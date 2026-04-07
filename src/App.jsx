@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { 
-  Home, Compass, Library, Download, ArrowDownToLine, 
-  Cloud, Search, Bell, Settings, Play, Pause, 
+import {
+  Home, Compass, Library, Download, ArrowDownToLine,
+  Cloud, Search, Bell, Settings, Play, Pause,
   SkipBack, SkipForward, Volume2, Shuffle, Repeat,
   Heart, Plus, X, Music, Car, AlertTriangle
 } from 'lucide-react';
@@ -32,7 +32,7 @@ function App() {
   const [activeSection, setActiveSection] = useState('All');
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentSong, setCurrentSong] = useState(initialMockSongs[0]);
-  
+
   // Modals state
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [cloudModalOpen, setCloudModalOpen] = useState(false);
@@ -41,10 +41,10 @@ function App() {
 
   // New Features State
   const [drivingMode, setDrivingMode] = useState(false);
-  const [listeningTime, setListeningTime] = useState(0); 
+  const [listeningTime, setListeningTime] = useState(0);
   const [healthWarningOpen, setHealthWarningOpen] = useState(false);
   const [songs, setSongs] = useState([]);
-  
+
   // Audio & Network State
   const audioRef = useRef(null);
   const [importUrl, setImportUrl] = useState('');
@@ -84,8 +84,8 @@ function App() {
   }, [isPlaying]);
 
   // Filtering data
-  const filteredSongs = activeSection === 'All' 
-    ? songs 
+  const filteredSongs = activeSection === 'All'
+    ? songs
     : songs.filter(s => s.lang === activeSection || activeSection === 'Top Plays');
 
   const handlePlay = (song) => {
@@ -108,7 +108,7 @@ function App() {
     if (!importUrl) return;
     setIsImporting(true);
     try {
-      const response = await axios.post('http://localhost:5000/api/playlist/import', { url: importUrl });
+      const response = await axios.post('https://auraplay.onrender.com/api/playlist/import', { url: importUrl });
       if (response.data && response.data.tracks) {
         // Merge fetched data onto existing UI Array natively
         setSongs(prev => [...response.data.tracks, ...prev]);
@@ -127,7 +127,7 @@ function App() {
   return (
     <div className="app-container">
       <audio ref={audioRef} src={currentSong?.audioUrl || 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3'} onEnded={() => setIsPlaying(false)} />
-      
+
       {/* SIDEBAR */}
       <aside className="sidebar glass">
         <div className="brand">
@@ -159,19 +159,19 @@ function App() {
           </button>
         </div>
 
-        <div 
-          className="profile-selector glass" 
+        <div
+          className="profile-selector glass"
           onClick={() => setProfileOpen(true)}
         >
           <div className="profile-avatar">{currentProfile.avatar}</div>
-          <div style={{flex: 1, textAlign: 'left', fontSize: '14px', fontWeight: 600}}>{currentProfile.name}</div>
+          <div style={{ flex: 1, textAlign: 'left', fontSize: '14px', fontWeight: 600 }}>{currentProfile.name}</div>
           <div className="online-indicator"></div>
         </div>
       </aside>
 
       {/* MAIN CONTENT */}
       <main className="main-wrapper">
-        
+
         <header className="topbar glass-panel">
           <div className="search-bar">
             <Search size={18} color="var(--text-muted)" />
@@ -187,8 +187,8 @@ function App() {
           {/* Categories / Segregation Header */}
           <div className="categories">
             {sections.map(sec => (
-              <button 
-                key={sec} 
+              <button
+                key={sec}
                 className={`category-pill ${activeSection === sec ? 'active' : ''}`}
                 onClick={() => setActiveSection(sec)}
               >
@@ -199,7 +199,7 @@ function App() {
 
           <div className="hero-banner">
             <div className="hero-subtitle">Trending Now</div>
-            <div className="hero-title">Experience The<br/>Purest Sound.</div>
+            <div className="hero-title">Experience The<br />Purest Sound.</div>
             <button className="hero-btn">Listen Offline</button>
           </div>
 
@@ -222,11 +222,11 @@ function App() {
               </div>
             ))}
           </div>
-          
+
           <div className="section-title">
             <span>Top Directors & Singers</span>
           </div>
-          
+
           <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))' }}>
             {['A.R. Rahman', 'Anirudh', 'Thaman S', 'Devi Sri Prasad', 'Shreya Ghoshal'].map((artist, i) => (
               <div className="card glass" key={i} style={{ textAlign: 'center', borderRadius: '24px' }}>
@@ -244,23 +244,23 @@ function App() {
       {/* PLAYER BAR */}
       <div className="player-bar glass-panel">
         <div className="player-left">
-          <img 
-            src={currentSong.cover} 
-            alt="Now Playing" 
-            className={`now-playing-img ${isPlaying ? 'playing' : ''}`} 
+          <img
+            src={currentSong.cover}
+            alt="Now Playing"
+            className={`now-playing-img ${isPlaying ? 'playing' : ''}`}
           />
           <div className="now-playing-info">
             <div className="song-title">{currentSong.title}</div>
             <div className="song-artist">{currentSong.artist}</div>
           </div>
-          <button className="control-btn" style={{marginLeft: '8px'}}><Heart size={20} /></button>
+          <button className="control-btn" style={{ marginLeft: '8px' }}><Heart size={20} /></button>
         </div>
 
         <div className="player-center">
           <div className="player-controls">
             <button className="control-btn"><Shuffle size={18} /></button>
             <button className="control-btn"><SkipBack size={24} /></button>
-            <button 
+            <button
               className="play-pause-btn"
               style={{ background: drivingMode ? 'var(--secondary)' : 'var(--primary)', color: 'white' }}
               onClick={togglePlayPause}
@@ -280,8 +280,8 @@ function App() {
         </div>
 
         <div className="player-right">
-          <button 
-            className="control-btn" 
+          <button
+            className="control-btn"
             onClick={() => setDrivingMode(!drivingMode)}
             style={{ color: drivingMode ? 'var(--secondary)' : 'var(--text-muted)' }}
             title="Driving Mode"
@@ -306,9 +306,9 @@ function App() {
             </div>
             <button onClick={() => setHealthWarningOpen(false)}><X size={24} /></button>
           </div>
-          <p style={{marginBottom: '20px', color: 'var(--text-main)', lineHeight: '1.6'}}>
-            You have been continually listening to audio for several hours. Prolonged exposure to continuous sound can cause fatigue and hearing hazards. 
-            <br/><br/>
+          <p style={{ marginBottom: '20px', color: 'var(--text-main)', lineHeight: '1.6' }}>
+            You have been continually listening to audio for several hours. Prolonged exposure to continuous sound can cause fatigue and hearing hazards.
+            <br /><br />
             <strong>We recommend taking a short break.</strong>
           </p>
           <button className="hero-btn" style={{ width: '100%', background: 'var(--secondary)', boxShadow: 'none' }} onClick={() => setHealthWarningOpen(false)}>
@@ -324,35 +324,35 @@ function App() {
             <div className="modal-title">Import Playlists</div>
             <button onClick={() => setExportModalOpen(false)}><X size={24} /></button>
           </div>
-          <p style={{marginBottom: '20px', color: 'var(--text-muted)'}}>
+          <p style={{ marginBottom: '20px', color: 'var(--text-muted)' }}>
             No login required! Just paste a link. We will automatically remove duplicates from your playlists.
           </p>
           <button className="integration-btn">
-            <div style={{background: '#1DB954', width: 32, height: 32, borderRadius: 8}} className="integration-icon"></div>
-            <div style={{flex: 1, textAlign: 'left'}}>Import from Spotify</div>
+            <div style={{ background: '#1DB954', width: 32, height: 32, borderRadius: 8 }} className="integration-icon"></div>
+            <div style={{ flex: 1, textAlign: 'left' }}>Import from Spotify</div>
           </button>
           <button className="integration-btn">
-            <div style={{background: '#FF0000', width: 32, height: 32, borderRadius: 8}} className="integration-icon"></div>
-            <div style={{flex: 1, textAlign: 'left'}}>Import from YouTube Music</div>
+            <div style={{ background: '#FF0000', width: 32, height: 32, borderRadius: 8 }} className="integration-icon"></div>
+            <div style={{ flex: 1, textAlign: 'left' }}>Import from YouTube Music</div>
           </button>
           <button className="integration-btn">
-            <div style={{background: '#2BC5B4', width: 32, height: 32, borderRadius: 8}} className="integration-icon"></div>
-            <div style={{flex: 1, textAlign: 'left'}}>Import from JioSaavn</div>
+            <div style={{ background: '#2BC5B4', width: 32, height: 32, borderRadius: 8 }} className="integration-icon"></div>
+            <div style={{ flex: 1, textAlign: 'left' }}>Import from JioSaavn</div>
           </button>
-          
-          <div style={{marginTop: '20px'}}>
-            <div style={{fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px'}}>OR PASTE LINK</div>
-            <div className="search-bar" style={{width: '100%', background: 'rgba(0,0,0,0.3)'}}>
-              <input 
-                 type="text" 
-                 placeholder="https://spotify.com/playlist..." 
-                 value={importUrl}
-                 onChange={e => setImportUrl(e.target.value)}
+
+          <div style={{ marginTop: '20px' }}>
+            <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px' }}>OR PASTE LINK</div>
+            <div className="search-bar" style={{ width: '100%', background: 'rgba(0,0,0,0.3)' }}>
+              <input
+                type="text"
+                placeholder="https://spotify.com/playlist..."
+                value={importUrl}
+                onChange={e => setImportUrl(e.target.value)}
               />
-              <button 
-                 onClick={handleImportPlaylist} 
-                 disabled={isImporting}
-                 style={{color: 'var(--primary)', fontWeight: 'bold'}}
+              <button
+                onClick={handleImportPlaylist}
+                disabled={isImporting}
+                style={{ color: 'var(--primary)', fontWeight: 'bold' }}
               >
                 {isImporting ? 'Syncing...' : 'Fetch'}
               </button>
@@ -368,40 +368,40 @@ function App() {
             <div className="modal-title">Cloud Sync for Downloads</div>
             <button onClick={() => setCloudModalOpen(false)}><X size={24} /></button>
           </div>
-          <p style={{marginBottom: '20px', color: 'var(--text-muted)'}}>
+          <p style={{ marginBottom: '20px', color: 'var(--text-muted)' }}>
             Save your offline music directly to your cloud storage.
           </p>
           <button className="integration-btn">
-            <div style={{background: '#4285F4', width: 32, height: 32, borderRadius: 8}} className="integration-icon"></div>
-            <div style={{flex: 1, textAlign: 'left'}}>Connect Google One</div>
+            <div style={{ background: '#4285F4', width: 32, height: 32, borderRadius: 8 }} className="integration-icon"></div>
+            <div style={{ flex: 1, textAlign: 'left' }}>Connect Google One</div>
           </button>
           <button className="integration-btn">
-            <div style={{background: '#0078D4', width: 32, height: 32, borderRadius: 8}} className="integration-icon"></div>
-            <div style={{flex: 1, textAlign: 'left'}}>Connect OneDrive</div>
+            <div style={{ background: '#0078D4', width: 32, height: 32, borderRadius: 8 }} className="integration-icon"></div>
+            <div style={{ flex: 1, textAlign: 'left' }}>Connect OneDrive</div>
           </button>
         </div>
       </div>
 
       {/* PROFILES MODAL */}
       <div className={`modal-overlay ${profileOpen ? 'active' : ''}`}>
-        <div className="modal-content glass" style={{width: '300px'}}>
+        <div className="modal-content glass" style={{ width: '300px' }}>
           <div className="modal-header">
             <div className="modal-title">Select Profile</div>
             <button onClick={() => setProfileOpen(false)}><X size={24} /></button>
           </div>
           {mockProfiles.map(p => (
-            <button 
-              key={p.id} 
-              className="integration-btn" 
-              style={{background: p.id === currentProfile.id ? 'var(--primary-glow)' : ''}}
+            <button
+              key={p.id}
+              className="integration-btn"
+              style={{ background: p.id === currentProfile.id ? 'var(--primary-glow)' : '' }}
               onClick={() => { setCurrentProfile(p); setProfileOpen(false); }}
             >
               <div className="profile-avatar">{p.avatar}</div>
-              <div style={{flex: 1, textAlign: 'left'}}>{p.name}</div>
+              <div style={{ flex: 1, textAlign: 'left' }}>{p.name}</div>
             </button>
           ))}
-          <button className="integration-btn" style={{justifyContent: 'center', color: 'var(--primary)', marginTop: '16px'}}>
-            <Plus size={18} style={{marginRight: '8px'}} /> Add Profile
+          <button className="integration-btn" style={{ justifyContent: 'center', color: 'var(--primary)', marginTop: '16px' }}>
+            <Plus size={18} style={{ marginRight: '8px' }} /> Add Profile
           </button>
         </div>
       </div>

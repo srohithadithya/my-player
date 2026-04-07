@@ -7,8 +7,19 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Security and Middleware
-app.use(cors({ origin: 'http://localhost:5173' })); // Bind explicitly to Vite frontend
+app.use(cors({ origin: '*' })); // Open CORS for Render deployment sync across all apps
 app.use(express.json());
+
+// ==========================================
+// ROUTE: Server Health Check
+// ==========================================
+app.get('/', (req, res) => {
+    res.status(200).json({
+        service: 'AuraPlay Core API',
+        status: 'Online & Secure',
+        version: '1.0.0'
+    });
+});
 
 // ==========================================
 // UTILITY: Deduplication Engine
