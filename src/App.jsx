@@ -4,7 +4,7 @@ import {
   Home, Compass, Library, Download, ArrowDownToLine,
   Cloud, Search, Bell, Settings, Play, Pause,
   SkipBack, SkipForward, Volume2, Shuffle, Repeat,
-  Heart, Plus, X, Music, Car, AlertTriangle, Youtube, Smartphone
+  Heart, Plus, X, Music, Car, AlertTriangle, PlayCircle
 } from 'lucide-react';
 import './App.css';
 
@@ -424,13 +424,13 @@ function App() {
           </p>
           <button className="integration-btn">
             <div style={{ background: '#1DB954', width: 32, height: 32, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-               <Smartphone size={16} color="white" />
+               <Music size={16} color="white" />
             </div>
             <div style={{ flex: 1, textAlign: 'left' }}>Import from Spotify</div>
           </button>
           <button className="integration-btn">
             <div style={{ background: '#FF0000', width: 32, height: 32, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-               <Youtube size={16} color="white" />
+               <PlayCircle size={16} color="white" />
             </div>
             <div style={{ flex: 1, textAlign: 'left' }}>Import from YouTube</div>
           </button>
