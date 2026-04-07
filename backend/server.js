@@ -52,25 +52,72 @@ app.post('/api/playlist/import', async (req, res) => {
         // For this architectural scaffolding, we mock the structural return perfectly:
 
         let parsedPlatform = 'Unknown';
-        if (url.includes('spotify.com')) parsedPlatform = 'Spotify';
+        let playlistId = '';
+        if (url.includes('spotify.com')) {
+            parsedPlatform = 'Spotify';
+            playlistId = url.split('playlist/')[1]?.split('?')[0];
+        }
         else if (url.includes('youtube.com') || url.includes('youtu.be')) parsedPlatform = 'YouTube Music';
         else if (url.includes('jiosaavn.com')) parsedPlatform = 'JioSaavn';
         else return res.status(400).json({ error: 'Unsupported URL platform.' });
 
-        const mockFetchedData = [
-            { id: `ext-${Date.now()}-1`, title: 'Imported Song 1', artist: 'Unknown Artist', cover: 'https://images.unsplash.com/photo-1614113489855-66422ad300a4?w=200', lang: 'Instrumental', platform: parsedPlatform },
-            { id: `ext-${Date.now()}-2`, title: 'Imported Song 1', artist: 'Unknown Artist', cover: 'https://images.unsplash.com/photo-1614113489855-66422ad300a4?w=200', lang: 'Instrumental', platform: parsedPlatform }, // Intentional Duplicate
-            { id: `ext-${Date.now()}-3`, title: 'Awesome Track', artist: 'Super Singer', cover: 'https://images.unsplash.com/photo-1493225457124-a1a2a5f5cb39?w=200', lang: 'English', platform: parsedPlatform }
-        ];
+        let fetchedTracks = [];
 
-        // 12. Run the deduplication rule backend-side as well
-        const deduplicatedPlaylist = mergeDuplicates(mockFetchedData);
+        // ==========================================
+        // REAL SPOTIFY API PIPELINE
+        // ==========================================
+        if (parsedPlatform === 'Spotify' && playlistId) {
+            try {
+                if (!process.env.SPOTIFY_CLIENT_ID || !process.env.SPOTIFY_CLIENT_SECRET) {
+                    throw new Error('Spotify API Keys missing in Environment Variables.');
+                }
+                
+                // 1. Authenticate with Spotify (Client Credentials Flow)
+                console.log('[INFO] Negotiating Spotify Identity Token...');
+                const authString = Buffer.from(process.env.SPOTIFY_CLIENT_ID + ':' + process.env.SPOTIFY_CLIENT_SECRET).toString('base64');
+                const tokenRes = await axios.post('https://accounts.spotify.com/api/token', 'grant_type=client_credentials', {
+                    headers: { 'Authorization': `Basic ${authString}`, 'Content-Type': 'application/x-www-form-urlencoded' }
+                });
+                
+                // 2. Extract Real Playlist Metadata
+                console.log('[INFO] Ripping Playlist Data from Spotify Servers...');
+                const playlistRes = await axios.get(`https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=50`, {
+                    headers: { 'Authorization': `Bearer ${tokenRes.data.access_token}` }
+                });
+
+                // 3. Map Spotify Data to AuraPlay Structure!
+                fetchedTracks = playlistRes.data.items.map(item => {
+                    const track = item.track;
+                    return {
+                        id: `spotify-${track.id}`,
+                        title: track.name,
+                        artist: track.artists.map(a => a.name).join(', '),
+                        cover: track.album.images[0]?.url || 'https://images.unsplash.com/photo-1614113489855-66422ad300a4?w=200',
+                        lang: 'Imported',
+                        platform: 'Spotify',
+                        audioUrl: track.preview_url || 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3' // Fallback to free test stream if no preview
+                    };
+                });
+            } catch (err) {
+                console.error('[SPOTIFY API FATAL]', err.response?.data || err.message);
+                return res.status(500).json({ error: 'Spotify API Handshake Failed. Verify Keys.' });
+            }
+        } 
+        else {
+            // Fallbacks for YouTube/Jio (Pending API Expansion)
+            fetchedTracks = [
+                { id: `ext-1`, title: 'Pending YouTube Integration', artist: 'Auth Example', cover: '', platform: parsedPlatform },
+            ];
+        }
+
+        // Run the deduplication firewall rule natively
+        const deduplicatedPlaylist = mergeDuplicates(fetchedTracks);
 
         res.status(200).json({
-            message: `Successfully mapped and imported ${deduplicatedPlaylist.length} unique tracks from ${parsedPlatform}`,
+            message: `Engine mapped and imported ${deduplicatedPlaylist.length} unique tracks from ${parsedPlatform}`,
             platform: parsedPlatform,
             tracks: deduplicatedPlaylist,
-            omittedDuplicates: mockFetchedData.length - deduplicatedPlaylist.length
+            omittedDuplicates: fetchedTracks.length - deduplicatedPlaylist.length
         });
     } catch (error) {
         console.error('[CRITICAL] Playlist import failed:', error);
