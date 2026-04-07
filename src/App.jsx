@@ -4,7 +4,7 @@ import {
   Home, Compass, Library, Download, ArrowDownToLine,
   Cloud, Search, Bell, Settings, Play, Pause,
   SkipBack, SkipForward, Volume2, Shuffle, Repeat,
-  Heart, Plus, X, Music, Car, AlertTriangle
+  Heart, Plus, X, Music, Car, AlertTriangle, Youtube, Smartphone
 } from 'lucide-react';
 import './App.css';
 
@@ -49,6 +49,12 @@ function App() {
   const audioRef = useRef(null);
   const [importUrl, setImportUrl] = useState('');
   const [isImporting, setIsImporting] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [volume, setVolume] = useState(0.7);
+  const [isShuffle, setIsShuffle] = useState(false);
+  const [isRepeat, setIsRepeat] = useState(false);
+  const [newProfileName, setNewProfileName] = useState('');
 
   // Merge Duplicates
   useEffect(() => {
@@ -97,12 +103,51 @@ function App() {
     setIsPlaying(!isPlaying);
   };
 
+  const handleNext = () => {
+    const currentIndex = songs.findIndex(s => s.id === currentSong.id);
+    if(isShuffle) {
+       setCurrentSong(songs[Math.floor(Math.random() * songs.length)]);
+    } else {
+       setCurrentSong(songs[(currentIndex + 1) % songs.length] || songs[0]);
+    }
+  };
+
+  const handlePrev = () => {
+    const currentIndex = songs.findIndex(s => s.id === currentSong.id);
+    setCurrentSong(songs[(currentIndex - 1 + songs.length) % songs.length] || songs[0]);
+  };
+
+  const handleTimeUpdate = () => {
+    setProgress(audioRef.current.currentTime);
+  };
+
+  const handleLoadedMetadata = () => {
+    setDuration(audioRef.current.duration);
+    if(audioRef.current) audioRef.current.volume = volume;
+  };
+
+  const formatTime = (time) => {
+    if (!time || isNaN(time)) return "00:00";
+    const m = Math.floor(time / 60);
+    const s = Math.floor(time % 60);
+    return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
+  };
+
   useEffect(() => {
     if (audioRef.current) {
       if (isPlaying) audioRef.current.play().catch(e => console.log('Audio playback error:', e));
       else audioRef.current.pause();
     }
   }, [isPlaying, currentSong]);
+
+  const handleAudioEnded = () => {
+    if(isRepeat) {
+      audioRef.current.currentTime = 0;
+      audioRef.current.play();
+    } else {
+      handleNext();
+    }
+  };
 
   const handleImportPlaylist = async () => {
     if (!importUrl) return;
@@ -126,7 +171,13 @@ function App() {
 
   return (
     <div className="app-container">
-      <audio ref={audioRef} src={currentSong?.audioUrl || 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3'} onEnded={() => setIsPlaying(false)} />
+      <audio 
+         ref={audioRef} 
+         src={currentSong?.audioUrl || 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3'} 
+         onEnded={handleAudioEnded} 
+         onTimeUpdate={handleTimeUpdate}
+         onLoadedMetadata={handleLoadedMetadata}
+      />
 
       {/* SIDEBAR */}
       <aside className="sidebar glass">
@@ -178,12 +229,27 @@ function App() {
             <input type="text" placeholder="Search for songs, artists, movies..." />
           </div>
           <div className="top-actions">
-            <button className="action-btn"><Bell size={18} /></button>
-            <button className="action-btn"><Settings size={18} /></button>
+            <button className="action-btn" onClick={() => alert('No new notifications!')}><Bell size={18} /></button>
+            <button className="action-btn" onClick={() => alert('Settings Menu Loaded.')}><Settings size={18} /></button>
           </div>
         </header>
 
         <div className="main-content">
+          {activeTab === 'Explore' && (
+            <div className="hero-banner" style={{background: 'var(--primary-glow)'}}>
+              <div className="hero-title">Global Top 50</div>
+              <p>Discover the most streamed tracks in the world.</p>
+            </div>
+          )}
+
+          {activeTab === 'Library' && (
+            <div className="section-title">
+              <span>Your Curated Library</span>
+            </div>
+          )}
+
+          {activeTab === 'Home' && (
+            <>
           {/* Categories / Segregation Header */}
           <div className="categories">
             {sections.map(sec => (
@@ -238,6 +304,9 @@ function App() {
             ))}
           </div>
 
+          </>
+          )}
+
         </div>
       </main>
 
@@ -258,8 +327,8 @@ function App() {
 
         <div className="player-center">
           <div className="player-controls">
-            <button className="control-btn"><Shuffle size={18} /></button>
-            <button className="control-btn"><SkipBack size={24} /></button>
+            <button className="control-btn" style={{color: isShuffle ? 'var(--primary)' : 'white'}} onClick={() => setIsShuffle(!isShuffle)}><Shuffle size={18} /></button>
+            <button className="control-btn" onClick={handlePrev}><SkipBack size={24} /></button>
             <button
               className="play-pause-btn"
               style={{ background: drivingMode ? 'var(--secondary)' : 'var(--primary)', color: 'white' }}
@@ -267,15 +336,31 @@ function App() {
             >
               {isPlaying ? <Pause fill="white" size={20} /> : <Play fill="white" size={20} />}
             </button>
-            <button className="control-btn"><SkipForward size={24} /></button>
-            <button className="control-btn"><Repeat size={18} /></button>
+            <button className="control-btn" onClick={handleNext}><SkipForward size={24} /></button>
+            <button className="control-btn" style={{color: isRepeat ? 'var(--primary)' : 'white'}} onClick={() => setIsRepeat(!isRepeat)}><Repeat size={18} /></button>
           </div>
           <div className="progress-container">
-            <span>01:24</span>
-            <div className="progress-bar-bg">
-              <div className="progress-bar-fill" style={{ background: drivingMode ? 'var(--secondary)' : 'var(--primary)' }}></div>
+            <span>{formatTime(progress)}</span>
+            <div className="progress-bar-bg" style={{position: 'relative', display: 'flex', alignItems: 'center'}}>
+              <input 
+                type="range" 
+                min="0" 
+                max={duration || 100} 
+                value={progress}
+                onChange={(e) => {
+                  audioRef.current.currentTime = e.target.value;
+                  setProgress(e.target.value);
+                }}
+                style={{position: 'absolute', width: '100%', opacity: 0, cursor: 'pointer', zIndex: 5, height: '10px'}}
+              />
+              <div 
+                className="progress-bar-fill" 
+                style={{ 
+                  background: drivingMode ? 'var(--secondary)' : 'var(--primary)', 
+                  width: `${(progress / (duration || 1)) * 100}%` 
+                }}></div>
             </div>
-            <span>03:45</span>
+            <span>{formatTime(duration)}</span>
           </div>
         </div>
 
@@ -289,9 +374,19 @@ function App() {
             <Car size={20} />
           </button>
           <button className="control-btn"><Volume2 size={20} /></button>
-          <div className="volume-bar" style={{ opacity: drivingMode ? 0.5 : 1 }}>
-            {/* When driving mode is on, volume is capped visually and functionally */}
-            <div className="volume-fill" style={{ width: drivingMode ? '25%' : '70%', transition: 'width 0.3s ease', background: drivingMode ? 'var(--secondary)' : 'white' }}></div>
+          <div className="volume-bar" style={{ opacity: drivingMode ? 0.5 : 1, position: 'relative', display: 'flex', alignItems: 'center' }}>
+            <input 
+              type="range" 
+              min="0" max="1" step="0.01" 
+              value={volume} 
+              onChange={(e) => {
+                const v = parseFloat(e.target.value);
+                setVolume(v);
+                if(audioRef.current) audioRef.current.volume = v;
+              }}
+              style={{position: 'absolute', width: '100%', opacity: 0, cursor: 'pointer', zIndex: 5, height: '10px'}}
+            />
+            <div className="volume-fill" style={{ width: drivingMode ? '25%' : `${volume * 100}%`, background: drivingMode ? 'var(--secondary)' : 'white' }}></div>
           </div>
         </div>
       </div>
@@ -328,15 +423,21 @@ function App() {
             No login required! Just paste a link. We will automatically remove duplicates from your playlists.
           </p>
           <button className="integration-btn">
-            <div style={{ background: '#1DB954', width: 32, height: 32, borderRadius: 8 }} className="integration-icon"></div>
+            <div style={{ background: '#1DB954', width: 32, height: 32, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+               <Smartphone size={16} color="white" />
+            </div>
             <div style={{ flex: 1, textAlign: 'left' }}>Import from Spotify</div>
           </button>
           <button className="integration-btn">
-            <div style={{ background: '#FF0000', width: 32, height: 32, borderRadius: 8 }} className="integration-icon"></div>
-            <div style={{ flex: 1, textAlign: 'left' }}>Import from YouTube Music</div>
+            <div style={{ background: '#FF0000', width: 32, height: 32, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+               <Youtube size={16} color="white" />
+            </div>
+            <div style={{ flex: 1, textAlign: 'left' }}>Import from YouTube</div>
           </button>
           <button className="integration-btn">
-            <div style={{ background: '#2BC5B4', width: 32, height: 32, borderRadius: 8 }} className="integration-icon"></div>
+            <div style={{ background: '#2BC5B4', width: 32, height: 32, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+               <Music size={16} color="white" />
+            </div>
             <div style={{ flex: 1, textAlign: 'left' }}>Import from JioSaavn</div>
           </button>
 
@@ -400,9 +501,28 @@ function App() {
               <div style={{ flex: 1, textAlign: 'left' }}>{p.name}</div>
             </button>
           ))}
-          <button className="integration-btn" style={{ justifyContent: 'center', color: 'var(--primary)', marginTop: '16px' }}>
-            <Plus size={18} style={{ marginRight: '8px' }} /> Add Profile
-          </button>
+          <div style={{display: 'flex', gap: '8px', marginTop: '16px'}}>
+            <input 
+               type="text" 
+               placeholder="New profile name..." 
+               value={newProfileName}
+               onChange={e => setNewProfileName(e.target.value)}
+               style={{flex: 1, background: 'rgba(0,0,0,0.3)', border: 'none', padding: '8px', color: 'white', borderRadius: '8px'}}
+            />
+            <button 
+              className="integration-btn" 
+              style={{justifyContent: 'center', color: 'var(--primary)'}}
+              onClick={() => {
+                if(newProfileName.trim() !== '') {
+                  mockProfiles.push({ id: Date.now(), name: newProfileName, avatar: newProfileName[0].toUpperCase() });
+                  setNewProfileName('');
+                  setProfileOpen(false);
+                }
+              }}
+            >
+              <Plus size={18} />
+            </button>
+          </div>
         </div>
       </div>
 
