@@ -142,6 +142,107 @@ app.get('/api/search/playlists', async (req, res) => {
 });
 
 // ==========================================
+// ROUTE: Album Details (Songs inside an Album)
+// ==========================================
+app.get('/api/albums/:id', async (req, res) => {
+    try {
+        const albumId = req.params.id;
+        const saavnRes = await axios.get(`https://saavn.sumit.co/api/albums?id=${albumId}`);
+        if (saavnRes.data.success !== true) throw new Error('JioSaavn API failed');
+
+        const album = saavnRes.data.data;
+        const formattedSongs = (album.songs || []).map(track => ({
+            id: track.id,
+            title: track.name,
+            artist: track.artists?.primary?.map(a => a.name).join(', ') || track.primaryArtists || 'Unknown Artist',
+            cover: track.image?.find(img => img.quality === '500x500')?.url || track.image?.[0]?.url || album.image?.find(img => img.quality === '500x500')?.url,
+            lang: track.language || album.language || 'Unknown',
+            audioUrl: track.downloadUrl?.find(dl => dl.quality === '320kbps')?.url || track.downloadUrl?.[0]?.url || '',
+            duration: track.duration,
+            platform: 'JioSaavn'
+        }));
+
+        res.status(200).json({
+            id: album.id,
+            title: album.name,
+            artist: album.artists?.primary?.map(a => a.name).join(', ') || 'Various Artists',
+            cover: album.image?.find(img => img.quality === '500x500')?.url || album.image?.[0]?.url,
+            year: album.year,
+            language: album.language,
+            songCount: album.songCount,
+            songs: mergeDuplicates(formattedSongs)
+        });
+    } catch (err) {
+        console.error('[CRITICAL] Album Detail Error:', err.message);
+        res.status(500).json({ error: 'Album detail fetch failed.' });
+    }
+});
+
+// ==========================================
+// ROUTE: Artist Details (Top Songs + Info)
+// ==========================================
+app.get('/api/artists/:id', async (req, res) => {
+    try {
+        const artistId = req.params.id;
+        const saavnRes = await axios.get(`https://saavn.sumit.co/api/artists/${artistId}`);
+        if (saavnRes.data.success !== true) throw new Error('JioSaavn API failed');
+
+        const artist = saavnRes.data.data;
+        const formattedSongs = (artist.topSongs || []).map(track => ({
+            id: track.id,
+            title: track.name,
+            artist: track.artists?.primary?.map(a => a.name).join(', ') || track.primaryArtists || artist.name,
+            cover: track.image?.find(img => img.quality === '500x500')?.url || track.image?.[0]?.url,
+            lang: track.language || 'Unknown',
+            audioUrl: track.downloadUrl?.find(dl => dl.quality === '320kbps')?.url || track.downloadUrl?.[0]?.url || '',
+            duration: track.duration,
+            platform: 'JioSaavn'
+        }));
+
+        res.status(200).json({
+            id: artist.id,
+            title: artist.name,
+            cover: artist.image?.find(img => img.quality === '500x500')?.url || artist.image?.[0]?.url,
+            followerCount: artist.followerCount,
+            fanCount: artist.fanCount,
+            isVerified: artist.isVerified,
+            songs: mergeDuplicates(formattedSongs)
+        });
+    } catch (err) {
+        console.error('[CRITICAL] Artist Detail Error:', err.message);
+        res.status(500).json({ error: 'Artist detail fetch failed.' });
+    }
+});
+
+// ==========================================
+// ROUTE: Artist Songs (Paginated)
+// ==========================================
+app.get('/api/artists/:id/songs', async (req, res) => {
+    try {
+        const artistId = req.params.id;
+        const page = req.query.page || 1;
+        const saavnRes = await axios.get(`https://saavn.sumit.co/api/artists/${artistId}/songs?page=${page}&sortBy=popularity`);
+        if (saavnRes.data.success !== true) throw new Error('JioSaavn API failed');
+
+        const formattedSongs = (saavnRes.data.data.songs || []).map(track => ({
+            id: track.id,
+            title: track.name,
+            artist: track.artists?.primary?.map(a => a.name).join(', ') || track.primaryArtists || 'Unknown Artist',
+            cover: track.image?.find(img => img.quality === '500x500')?.url || track.image?.[0]?.url,
+            lang: track.language || 'Unknown',
+            audioUrl: track.downloadUrl?.find(dl => dl.quality === '320kbps')?.url || track.downloadUrl?.[0]?.url || '',
+            duration: track.duration,
+            platform: 'JioSaavn'
+        }));
+
+        res.status(200).json(mergeDuplicates(formattedSongs));
+    } catch (err) {
+        console.error('[CRITICAL] Artist Songs Error:', err.message);
+        res.status(500).json({ error: 'Artist songs fetch failed.' });
+    }
+});
+
+// ==========================================
 // ROUTE: ML Recommendation Engine
 // ==========================================
 app.post('/api/recommend', async (req, res) => {
