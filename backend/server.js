@@ -46,7 +46,7 @@ app.get('/api/search', async (req, res) => {
 
         const saavnRes = await axios.get(`https://saavn.sumit.co/api/search/songs?query=${encodeURIComponent(query)}`);
         
-        if (saavnRes.data.status !== 'SUCCESS') {
+        if (saavnRes.data.success !== true) {
             throw new Error('JioSaavn API failed');
         }
 
@@ -101,7 +101,7 @@ app.post('/api/recommend', async (req, res) => {
         const saavnRes = await axios.get(`https://saavn.sumit.co/api/search/songs?query=${encodeURIComponent(topArtist)}`);
         
         let recommended = [];
-        if (saavnRes.data.status === 'SUCCESS' && saavnRes.data.data.results) {
+        if (saavnRes.data.success === true && saavnRes.data.data.results) {
             recommended = saavnRes.data.data.results.map(track => ({
                 id: track.id,
                 title: track.name,
