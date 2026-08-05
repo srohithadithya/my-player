@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Capacitor } from '@capacitor/core';
 import {
   Home, Compass, Library, Download, ArrowDownToLine,
   Cloud, Search, Bell, Settings, Play, Pause,
@@ -45,6 +47,7 @@ function App() {
   const [healthWarningDisabled, setHealthWarningDisabled] = useState(false);
   const [songs, setSongs] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchCategory, setSearchCategory] = useState('songs');
   const [mlRecommendations, setMlRecommendations] = useState([]);
   const [history, setHistory] = useState([]);
   const [downloads, setDownloads] = useState([]);
@@ -109,7 +112,7 @@ function App() {
     const delay = setTimeout(async () => {
       setIsSearching(true);
       try {
-        const res = await axios.get(`https://auraplay.onrender.com/api/search/songs?q=${encodeURIComponent(searchQuery)}`);
+        const res = await axios.get(`https://auraplay.onrender.com/api/search/${searchCategory}?q=${encodeURIComponent(searchQuery)}`);
         if (res.data) setSongs(res.data);
       } catch (e) {
         console.error("Search failed");
@@ -118,7 +121,7 @@ function App() {
       }
     }, 500);
     return () => clearTimeout(delay);
-  }, [searchQuery]);
+  }, [searchQuery, searchCategory]);
 
   // Health Hazard Tracker
   useEffect(() => {
@@ -141,6 +144,9 @@ function App() {
     : songs.filter(s => s.lang === activeSection || activeSection === 'Top Plays');
 
   const handlePlay = (song) => {
+    if (song.type === 'album' || song.type === 'artist' || song.type === 'playlist') {
+       return alert(`Viewing ${song.type} details is coming in the next update! For now, search 'songs' to play audio.`);
+    }
     setCurrentSong(song);
     setIsPlaying(true);
     
@@ -223,22 +229,46 @@ function App() {
   const handleDownload = async (song) => {
     if (!song.audioUrl) return alert('Cannot download. Source unavailable.');
     try {
-      alert(`Downloading ${song.title}...`);
+      alert(`Downloading ${song.title} securely to Native Storage...`);
       const response = await fetch(song.audioUrl);
       const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.style.display = 'none';
-      a.href = url;
-      a.download = `${song.title} - ${song.artist}.mp3`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
       
-      const newDls = mergeDuplicates([song, ...downloads]);
-      setDownloads(newDls);
-      localStorage.setItem('auraplay_downloads', JSON.stringify(newDls));
-      alert('Download complete! Saved to local files and Offline Library.');
+      const reader = new FileReader();
+      reader.readAsDataURL(blob);
+      reader.onloadend = async () => {
+        const base64data = reader.result;
+        let finalUri = '';
+        
+        if (Capacitor.isNativePlatform()) {
+          const fileName = `auraplay_${song.id}.mp3`;
+          await Filesystem.writeFile({
+            path: fileName,
+            data: base64data,
+            directory: Directory.Data,
+          });
+          const uriResult = await Filesystem.getUri({
+            directory: Directory.Data,
+            path: fileName
+          });
+          finalUri = Capacitor.convertFileSrc(uriResult.uri);
+        } else {
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = `${song.title} - ${song.artist}.mp3`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            finalUri = song.audioUrl; // Fallback for web
+        }
+
+        const offlineSong = { ...song, localUri: finalUri };
+        const newDls = mergeDuplicates([offlineSong, ...downloads]);
+        setDownloads(newDls);
+        localStorage.setItem('auraplay_downloads', JSON.stringify(newDls));
+        alert('Download complete! Saved to Secure Native Filesystem.');
+      };
     } catch (err) {
       alert('Network issue during download.');
     }
@@ -248,7 +278,7 @@ function App() {
     <div className="app-container">
       <audio 
          ref={audioRef} 
-         src={currentSong?.audioUrl || 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3'} 
+         src={currentSong?.localUri || currentSong?.audioUrl || 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3'} 
          onEnded={handleAudioEnded} 
          onTimeUpdate={handleTimeUpdate}
          onLoadedMetadata={handleLoadedMetadata}
@@ -303,10 +333,25 @@ function App() {
             {isSearching ? <div className="online-indicator" style={{background: 'var(--primary)', position: 'relative', top: 0}}></div> : <Search size={18} color="var(--text-muted)" />}
             <input 
               type="text" 
-              placeholder="Live Search via JioSaavn API..." 
+              placeholder={`Search for ${searchCategory}...`}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
+          </div>
+          <div className="search-filters" style={{display: 'flex', gap: '8px', padding: '0 10px', marginLeft: '10px'}}>
+             {['songs', 'albums', 'artists', 'playlists'].map(cat => (
+               <button 
+                 key={cat} 
+                 onClick={() => { setSearchCategory(cat); setSongs([]); }}
+                 style={{
+                    background: searchCategory === cat ? 'var(--primary)' : 'rgba(255,255,255,0.05)',
+                    border: 'none', color: '#fff', padding: '6px 12px', borderRadius: '20px',
+                    textTransform: 'capitalize', fontSize: '12px', cursor: 'pointer'
+                 }}
+               >
+                 {cat}
+               </button>
+             ))}
           </div>
           <div className="top-actions">
             <button className="action-btn" onClick={() => alert('No new notifications!')}><Bell size={18} /></button>
@@ -394,7 +439,7 @@ function App() {
 
           <div className="grid">
             {filteredSongs.map((song) => (
-              <div className="card glass" key={song.id} onClick={() => handlePlay(song)}>
+              <div className={`card glass ${song.type === 'artist' ? 'artist' : ''}`} key={song.id} onClick={() => handlePlay(song)}>
                 <div className="card-img-wrapper">
                   <img src={song.cover} alt="Cover" className="card-img" />
                   <div className="card-play-btn">
@@ -429,7 +474,8 @@ function App() {
       </main>
 
       {/* PLAYER BAR */}
-      <div className="player-bar glass-panel">
+      <div className="player-bar-container">
+        <div className="player-island">
         <div className="player-left">
           <img
             src={currentSong.cover}
@@ -511,8 +557,6 @@ function App() {
               }}
               style={{position: 'absolute', width: '100%', opacity: 0, cursor: 'pointer', zIndex: 5, height: '10px'}}
             />
-            <div className="volume-fill" style={{ width: drivingMode ? '25%' : `${volume * 100}%`, background: drivingMode ? 'var(--secondary)' : 'white' }}></div>
-          </div>
         </div>
       </div>
 
