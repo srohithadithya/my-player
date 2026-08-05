@@ -43,7 +43,13 @@ function App() {
   const [drivingMode, setDrivingMode] = useState(false);
   const [listeningTime, setListeningTime] = useState(0);
   const [healthWarningOpen, setHealthWarningOpen] = useState(false);
+  const [healthWarningDisabled, setHealthWarningDisabled] = useState(false);
   const [songs, setSongs] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [mlRecommendations, setMlRecommendations] = useState([]);
+  const [history, setHistory] = useState([]);
+  const [downloads, setDownloads] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
 
   // Audio & Network State
   const audioRef = useRef(null);
@@ -56,38 +62,70 @@ function App() {
   const [isRepeat, setIsRepeat] = useState(false);
   const [newProfileName, setNewProfileName] = useState('');
 
-  // Merge Duplicates
+  // Merge Duplicates Engine (Frontend Side)
+  const mergeDuplicates = (playlist) => {
+    const seen = new Set();
+    return playlist.filter(song => {
+      const normalize = str => (str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const key = `${normalize(song.title)}-${normalize(song.artist)}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+
   useEffect(() => {
-    const mergeDuplicates = (playlist) => {
-      const seen = new Set();
-      return playlist.filter(song => {
-        const key = `${song.title.toLowerCase()}-${song.artist.toLowerCase()}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-    };
     setSongs(mergeDuplicates(initialMockSongs));
+    const savedHistory = JSON.parse(localStorage.getItem('auraplay_history')) || [];
+    const savedDownloads = JSON.parse(localStorage.getItem('auraplay_downloads')) || [];
+    setHistory(savedHistory);
+    setDownloads(savedDownloads);
+    
+    // Initial ML Boot
+    if (savedHistory.length > 0) fetchRecommendations(savedHistory);
   }, []);
 
-  // Health Hazard Tracker (Simulated: e.g. 7200 seconds = 2 hours)
+  // ML Fetcher
+  const fetchRecommendations = async (hist) => {
+    try {
+       const res = await axios.post('http://localhost:5000/api/recommend', { history: hist });
+       if (res.data && res.data.length > 0) setMlRecommendations(res.data);
+    } catch (e) {
+       console.error("ML Engine Error:", e);
+    }
+  };
+
+  // Search Engine
+  useEffect(() => {
+    if (!searchQuery.trim()) return;
+    const delay = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const res = await axios.get(`http://localhost:5000/api/search?q=${encodeURIComponent(searchQuery)}`);
+        if (res.data) setSongs(res.data);
+      } catch (e) {
+        console.error("Search failed");
+      } finally {
+        setIsSearching(false);
+      }
+    }, 500);
+    return () => clearTimeout(delay);
+  }, [searchQuery]);
+
+  // Health Hazard Tracker
   useEffect(() => {
     let timer;
-    if (isPlaying) {
+    if (isPlaying && !healthWarningDisabled) {
       timer = setInterval(() => {
         setListeningTime(prev => {
           const newTime = prev + 1;
-          // For demonstration, trigger warning after 7200 seconds (2 hours)
-          // We will mock it here with 7200 realistically
-          if (newTime === 7200) {
-            setHealthWarningOpen(true);
-          }
+          if (newTime === 7200) setHealthWarningOpen(true);
           return newTime;
         });
       }, 1000);
     }
     return () => clearInterval(timer);
-  }, [isPlaying]);
+  }, [isPlaying, healthWarningDisabled]);
 
   // Filtering data
   const filteredSongs = activeSection === 'All'
@@ -97,6 +135,12 @@ function App() {
   const handlePlay = (song) => {
     setCurrentSong(song);
     setIsPlaying(true);
+    
+    // Add to history for ML pipeline
+    const newHist = [song, ...history.filter(h => h.id !== song.id)].slice(0, 10);
+    setHistory(newHist);
+    localStorage.setItem('auraplay_history', JSON.stringify(newHist));
+    fetchRecommendations(newHist);
   };
 
   const togglePlayPause = () => {
@@ -153,10 +197,9 @@ function App() {
     if (!importUrl) return;
     setIsImporting(true);
     try {
-      const response = await axios.post('https://auraplay.onrender.com/api/playlist/import', { url: importUrl });
+      const response = await axios.post('http://localhost:5000/api/playlist/import', { url: importUrl });
       if (response.data && response.data.tracks) {
-        // Merge fetched data onto existing UI Array natively
-        setSongs(prev => [...response.data.tracks, ...prev]);
+        setSongs(prev => mergeDuplicates([...response.data.tracks, ...prev]));
         setExportModalOpen(false);
         setImportUrl('');
         alert(response.data.message);
@@ -166,6 +209,30 @@ function App() {
       console.error(err);
     } finally {
       setIsImporting(false);
+    }
+  };
+
+  const handleDownload = async (song) => {
+    if (!song.audioUrl) return alert('Cannot download. Source unavailable.');
+    try {
+      alert(`Downloading ${song.title}...`);
+      const response = await fetch(song.audioUrl);
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = `${song.title} - ${song.artist}.mp3`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      
+      const newDls = mergeDuplicates([song, ...downloads]);
+      setDownloads(newDls);
+      localStorage.setItem('auraplay_downloads', JSON.stringify(newDls));
+      alert('Download complete! Saved to local files and Offline Library.');
+    } catch (err) {
+      alert('Network issue during download.');
     }
   };
 
@@ -225,8 +292,13 @@ function App() {
 
         <header className="topbar glass-panel">
           <div className="search-bar">
-            <Search size={18} color="var(--text-muted)" />
-            <input type="text" placeholder="Search for songs, artists, movies..." />
+            {isSearching ? <div className="online-indicator" style={{background: 'var(--primary)', position: 'relative', top: 0}}></div> : <Search size={18} color="var(--text-muted)" />}
+            <input 
+              type="text" 
+              placeholder="Live Search via JioSaavn API..." 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
           </div>
           <div className="top-actions">
             <button className="action-btn" onClick={() => alert('No new notifications!')}><Bell size={18} /></button>
@@ -243,9 +315,27 @@ function App() {
           )}
 
           {activeTab === 'Library' && (
+            <>
             <div className="section-title">
-              <span>Your Curated Library</span>
+              <span>Your Offline & Downloaded Music</span>
             </div>
+            {downloads.length === 0 ? (
+               <p style={{color: 'var(--text-muted)'}}>No downloaded songs yet. Click the download icon on the player!</p>
+            ) : (
+              <div className="grid">
+              {downloads.map((song) => (
+                <div className="card glass" key={song.id} onClick={() => handlePlay(song)}>
+                  <div className="card-img-wrapper">
+                    <img src={song.cover} alt="Cover" className="card-img" />
+                    <div className="card-play-btn"><Play fill="white" size={20} /></div>
+                  </div>
+                  <div className="card-title">{song.title}</div>
+                  <div className="card-subtitle">{song.artist} • Offline</div>
+                </div>
+              ))}
+              </div>
+            )}
+            </>
           )}
 
           {activeTab === 'Home' && (
@@ -269,8 +359,28 @@ function App() {
             <button className="hero-btn">Listen Offline</button>
           </div>
 
+          {mlRecommendations.length > 0 && !searchQuery && (
+             <>
+               <div className="section-title" style={{marginTop: '20px'}}>
+                 <span>Recommended For You (ML)</span>
+               </div>
+               <div className="grid">
+                 {mlRecommendations.slice(0, 5).map((song) => (
+                   <div className="card glass" key={song.id} onClick={() => handlePlay(song)} style={{border: '1px solid var(--primary)'}}>
+                     <div className="card-img-wrapper">
+                       <img src={song.cover} alt="Cover" className="card-img" />
+                       <div className="card-play-btn"><Play fill="white" size={20} /></div>
+                     </div>
+                     <div className="card-title">{song.title}</div>
+                     <div className="card-subtitle">{song.artist} • ML Pick</div>
+                   </div>
+                 ))}
+               </div>
+             </>
+          )}
+
           <div className="section-title">
-            <span>{activeSection} Music</span>
+            <span>{searchQuery ? `Search Results for "${searchQuery}"` : `${activeSection} Music`}</span>
             <span className="see-all">See All</span>
           </div>
 
@@ -284,7 +394,7 @@ function App() {
                   </div>
                 </div>
                 <div className="card-title">{song.title}</div>
-                <div className="card-subtitle">{song.artist} • {song.lang}</div>
+                <div className="card-subtitle">{song.artist} • {song.platform || song.lang}</div>
               </div>
             ))}
           </div>
@@ -322,7 +432,14 @@ function App() {
             <div className="song-title">{currentSong.title}</div>
             <div className="song-artist">{currentSong.artist}</div>
           </div>
-          <button className="control-btn" style={{ marginLeft: '8px' }}><Heart size={20} /></button>
+          <button 
+             className="control-btn" 
+             style={{ marginLeft: '8px' }}
+             onClick={() => handleDownload(currentSong)}
+             title="Download MP3 (Free)"
+          >
+             <ArrowDownToLine size={20} color="var(--primary)" />
+          </button>
         </div>
 
         <div className="player-center">
@@ -406,9 +523,17 @@ function App() {
             <br /><br />
             <strong>We recommend taking a short break.</strong>
           </p>
-          <button className="hero-btn" style={{ width: '100%', background: 'var(--secondary)', boxShadow: 'none' }} onClick={() => setHealthWarningOpen(false)}>
-            I understand, dismiss
-          </button>
+          <div style={{display: 'flex', gap: '10px'}}>
+             <button className="hero-btn" style={{ flex: 1, background: 'var(--secondary)', boxShadow: 'none' }} onClick={() => setHealthWarningOpen(false)}>
+               Dismiss
+             </button>
+             <button className="hero-btn" style={{ flex: 1, background: 'rgba(255,255,255,0.1)', color: 'var(--text-muted)', boxShadow: 'none' }} onClick={() => {
+                 setHealthWarningDisabled(true);
+                 setHealthWarningOpen(false);
+             }}>
+               Disable Warnings
+             </button>
+          </div>
         </div>
       </div>
 
