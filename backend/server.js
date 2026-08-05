@@ -37,38 +37,107 @@ const mergeDuplicates = (playlist) => {
 };
 
 // ==========================================
-// ROUTE: Live JioSaavn Search Proxy
+// ROUTE: Live JioSaavn Search Proxies
 // ==========================================
-app.get('/api/search', async (req, res) => {
+
+// 1. Search Songs (Fallback for backward compatibility included)
+app.get(['/api/search', '/api/search/songs'], async (req, res) => {
     try {
         const query = req.query.q;
         if (!query) return res.status(400).json({ error: 'Search query required.' });
 
         const saavnRes = await axios.get(`https://saavn.sumit.co/api/search/songs?query=${encodeURIComponent(query)}`);
-        
-        if (saavnRes.data.success !== true) {
-            throw new Error('JioSaavn API failed');
-        }
+        if (saavnRes.data.success !== true) throw new Error('JioSaavn API failed');
 
-        const rawSongs = saavnRes.data.data.results || [];
-        const formattedSongs = rawSongs.map(track => {
-            return {
-                id: track.id,
-                title: track.name,
-                artist: track.artists.primary.map(a => a.name).join(', ') || 'Unknown Artist',
-                cover: track.image.find(img => img.quality === '500x500')?.url || track.image[0]?.url,
-                lang: track.language || 'Unknown',
-                audioUrl: track.downloadUrl.find(dl => dl.quality === '320kbps')?.url || track.downloadUrl[0]?.url,
-                platform: 'JioSaavn'
-            };
-        });
+        const formattedSongs = (saavnRes.data.data.results || []).map(track => ({
+            id: track.id,
+            title: track.name,
+            artist: track.artists.primary.map(a => a.name).join(', ') || 'Unknown Artist',
+            cover: track.image.find(img => img.quality === '500x500')?.url || track.image[0]?.url,
+            lang: track.language || 'Unknown',
+            audioUrl: track.downloadUrl?.find(dl => dl.quality === '320kbps')?.url || track.downloadUrl?.[0]?.url || '',
+            platform: 'JioSaavn'
+        }));
 
-        const deduplicated = mergeDuplicates(formattedSongs);
-        res.status(200).json(deduplicated);
-
+        res.status(200).json(mergeDuplicates(formattedSongs));
     } catch (err) {
-        console.error('[CRITICAL] Search Proxy Error:', err.message);
-        res.status(500).json({ error: 'Search engine failed.' });
+        console.error('[CRITICAL] Songs Search Error:', err.message);
+        res.status(500).json({ error: 'Songs search engine failed.' });
+    }
+});
+
+// 2. Search Albums
+app.get('/api/search/albums', async (req, res) => {
+    try {
+        const query = req.query.q;
+        if (!query) return res.status(400).json({ error: 'Search query required.' });
+
+        const saavnRes = await axios.get(`https://saavn.sumit.co/api/search/albums?query=${encodeURIComponent(query)}`);
+        if (saavnRes.data.success !== true) throw new Error('JioSaavn API failed');
+
+        const formattedAlbums = (saavnRes.data.data.results || []).map(album => ({
+            id: album.id,
+            title: album.name,
+            artist: album.artists?.primary?.map(a => a.name).join(', ') || 'Unknown Artist',
+            cover: album.image.find(img => img.quality === '500x500')?.url || album.image[0]?.url,
+            year: album.year,
+            language: album.language,
+            type: 'album'
+        }));
+
+        res.status(200).json(formattedAlbums);
+    } catch (err) {
+        console.error('[CRITICAL] Albums Search Error:', err.message);
+        res.status(500).json({ error: 'Albums search engine failed.' });
+    }
+});
+
+// 3. Search Artists
+app.get('/api/search/artists', async (req, res) => {
+    try {
+        const query = req.query.q;
+        if (!query) return res.status(400).json({ error: 'Search query required.' });
+
+        const saavnRes = await axios.get(`https://saavn.sumit.co/api/search/artists?query=${encodeURIComponent(query)}`);
+        if (saavnRes.data.success !== true) throw new Error('JioSaavn API failed');
+
+        const formattedArtists = (saavnRes.data.data.results || []).map(artist => ({
+            id: artist.id,
+            title: artist.name, // Using 'title' so UI can map it identically to songs
+            role: artist.role,
+            cover: artist.image.find(img => img.quality === '500x500')?.url || artist.image[0]?.url,
+            type: 'artist'
+        }));
+
+        res.status(200).json(formattedArtists);
+    } catch (err) {
+        console.error('[CRITICAL] Artists Search Error:', err.message);
+        res.status(500).json({ error: 'Artists search engine failed.' });
+    }
+});
+
+// 4. Search Playlists
+app.get('/api/search/playlists', async (req, res) => {
+    try {
+        const query = req.query.q;
+        if (!query) return res.status(400).json({ error: 'Search query required.' });
+
+        const saavnRes = await axios.get(`https://saavn.sumit.co/api/search/playlists?query=${encodeURIComponent(query)}`);
+        if (saavnRes.data.success !== true) throw new Error('JioSaavn API failed');
+
+        const formattedPlaylists = (saavnRes.data.data.results || []).map(playlist => ({
+            id: playlist.id,
+            title: playlist.title,
+            language: playlist.language,
+            songCount: playlist.songCount,
+            cover: playlist.image.find(img => img.quality === '500x500')?.url || playlist.image[0]?.url,
+            type: 'playlist'
+        }));
+
+        res.status(200).json(formattedPlaylists);
+    } catch (err) {
+        console.error('[CRITICAL] Playlists Search Error:', err.message);
+        res.status(500).json({ error: 'Playlists search engine failed.' });
     }
 });
 
