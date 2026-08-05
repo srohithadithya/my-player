@@ -557,8 +557,11 @@ function App() {
               }}
               style={{position: 'absolute', width: '100%', opacity: 0, cursor: 'pointer', zIndex: 5, height: '10px'}}
             />
+            <div className="volume-fill" style={{ width: drivingMode ? '25%' : `${volume * 100}%`, background: drivingMode ? 'var(--secondary)' : 'white' }}></div>
+          </div>
         </div>
       </div>
+    </div>
 
       {/* HEALTH HAZARD MODAL */}
       <div className={`modal-overlay ${healthWarningOpen ? 'active' : ''}`}>
