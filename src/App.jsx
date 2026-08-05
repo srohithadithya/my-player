@@ -11,708 +11,500 @@ import {
 } from 'lucide-react';
 import './App.css';
 
+// ============================================================
+// CONFIGURATION
+// ============================================================
 const API_BASE = 'https://auraplay.onrender.com';
+const LANG_FILTERS = ['All', 'Telugu', 'Hindi', 'English', 'Tamil', 'Malayalam'];
+const SEARCH_CATS = ['songs', 'albums', 'artists', 'playlists'];
+const CAT_ICONS = { songs: Music, albums: Disc3, artists: Users, playlists: ListMusic };
 
-const sections = ['All', 'Telugu', 'Hindi', 'English', 'Tamil', 'Malayalam'];
-
-const loadingSong = { 
-  id: 'loading', title: 'AuraPlay', artist: 'Search for music to begin', 
-  cover: 'https://images.unsplash.com/photo-1614113489855-66422ad300a4?w=200', 
-  lang: 'Network', audioUrl: '' 
+const PLACEHOLDER_SONG = {
+  id: 'placeholder', title: 'AuraPlay', artist: 'Search to begin',
+  cover: 'https://images.unsplash.com/photo-1614113489855-66422ad300a4?w=200',
+  audioUrl: '', lang: ''
 };
 
-const mockProfiles = [
+const PROFILES = [
   { id: 1, name: 'Rohit', avatar: 'R' },
   { id: 2, name: 'Guest', avatar: 'G' },
 ];
 
+// ============================================================
+// UTILITIES
+// ============================================================
+const dedupe = (list) => {
+  const seen = new Set();
+  return (list || []).filter(item => {
+    const norm = s => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const key = `${norm(item.title)}-${norm(item.artist)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+const fmtTime = (t) => {
+  if (!t || isNaN(t)) return '0:00';
+  const m = Math.floor(t / 60);
+  const s = Math.floor(t % 60);
+  return `${m}:${s < 10 ? '0' : ''}${s}`;
+};
+
+// ============================================================
+// APP COMPONENT
+// ============================================================
 function App() {
-  const [activeTab, setActiveTab] = useState('Home');
-  const [activeSection, setActiveSection] = useState('All');
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentSong, setCurrentSong] = useState(loadingSong);
+  // Navigation
+  const [tab, setTab] = useState('Home');
+  const [lang, setLang] = useState('All');
 
-  // Modals
-  const [exportModalOpen, setExportModalOpen] = useState(false);
-  const [cloudModalOpen, setCloudModalOpen] = useState(false);
-  const [profileOpen, setProfileOpen] = useState(false);
-  const [currentProfile, setCurrentProfile] = useState(mockProfiles[0]);
-
-  // Features
-  const [drivingMode, setDrivingMode] = useState(false);
-  const [listeningTime, setListeningTime] = useState(0);
-  const [healthWarningOpen, setHealthWarningOpen] = useState(false);
-  const [healthWarningDisabled, setHealthWarningDisabled] = useState(false);
+  // Data
   const [songs, setSongs] = useState([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchCategory, setSearchCategory] = useState('songs');
-  const [mlRecommendations, setMlRecommendations] = useState([]);
+  const [queue, setQueue] = useState([]);
   const [history, setHistory] = useState([]);
   const [downloads, setDownloads] = useState([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+  const [mlPicks, setMlPicks] = useState([]);
 
-  // Detail View State — for albums, artists, playlists
-  const [detailView, setDetailView] = useState(null); // { type, id, title, cover, songs }
-  const [detailLoading, setDetailLoading] = useState(false);
+  // Search
+  const [query, setQuery] = useState('');
+  const [category, setCategory] = useState('songs');
+  const [searching, setSearching] = useState(false);
+  const [booting, setBooting] = useState(true);
 
-  // Audio & Network
-  const audioRef = useRef(null);
-  const [importUrl, setImportUrl] = useState('');
-  const [isImporting, setIsImporting] = useState(false);
+  // Player
+  const [current, setCurrent] = useState(PLACEHOLDER_SONG);
+  const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [volume, setVolume] = useState(0.7);
-  const [isShuffle, setIsShuffle] = useState(false);
-  const [isRepeat, setIsRepeat] = useState(false);
-  const [newProfileName, setNewProfileName] = useState('');
+  const [vol, setVol] = useState(0.7);
+  const [shuffle, setShuffle] = useState(false);
+  const [repeat, setRepeat] = useState(false);
+  const [drivingMode, setDrivingMode] = useState(false);
+  const audioRef = useRef(null);
 
-  // Queue for playback
-  const [queue, setQueue] = useState([]);
+  // Detail view (album / artist / playlist drill-down)
+  const [detail, setDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
-  const mergeDuplicates = (playlist) => {
-    const seen = new Set();
-    return playlist.filter(song => {
-      const normalize = str => (str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-      const key = `${normalize(song.title)}-${normalize(song.artist)}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-  };
+  // Modals
+  const [importOpen, setImportOpen] = useState(false);
+  const [cloudOpen, setCloudOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [healthOpen, setHealthOpen] = useState(false);
+  const [healthOff, setHealthOff] = useState(false);
+  const [profile, setProfile] = useState(PROFILES[0]);
+  const [importUrl, setImportUrl] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [listenSec, setListenSec] = useState(0);
 
   // ============================
-  // BOOT: Fetch trending songs
+  // BOOT
   // ============================
   useEffect(() => {
-    const boot = async () => {
-      setIsLoading(true);
+    (async () => {
+      setBooting(true);
       try {
-        const res = await axios.get(`${API_BASE}/api/search/songs?q=trending`);
-        if (res.data && res.data.length > 0) {
-          setSongs(res.data);
-          setQueue(res.data);
-          setCurrentSong(res.data[0]);
-        }
-      } catch (e) {
-        console.log('Boot fetch failed, trying fallback...');
+        const r = await axios.get(`${API_BASE}/api/search/songs?q=trending`);
+        if (r.data?.length) { setSongs(r.data); setQueue(r.data); setCurrent(r.data[0]); }
+      } catch {
         try {
-          const fallback = await axios.get(`${API_BASE}/api/search/songs?q=arijit singh`);
-          if (fallback.data && fallback.data.length > 0) {
-            setSongs(fallback.data);
-            setQueue(fallback.data);
-            setCurrentSong(fallback.data[0]);
-          }
-        } catch (e2) { console.log('Fallback also failed.'); }
-      } finally {
-        setIsLoading(false);
+          const fb = await axios.get(`${API_BASE}/api/search/songs?q=latest hits`);
+          if (fb.data?.length) { setSongs(fb.data); setQueue(fb.data); setCurrent(fb.data[0]); }
+        } catch { /* offline mode */ }
       }
-    };
-    boot();
+      setBooting(false);
+    })();
+    setHistory(JSON.parse(localStorage.getItem('aura_hist') || '[]'));
+    setDownloads(JSON.parse(localStorage.getItem('aura_dl') || '[]'));
+  }, []);
 
-    const savedHistory = JSON.parse(localStorage.getItem('auraplay_history')) || [];
-    const savedDownloads = JSON.parse(localStorage.getItem('auraplay_downloads')) || [];
-    setHistory(savedHistory);
-    setDownloads(savedDownloads);
-    if (savedHistory.length > 0) fetchRecommendations(savedHistory);
+  // Boot ML
+  useEffect(() => {
+    const h = JSON.parse(localStorage.getItem('aura_hist') || '[]');
+    if (h.length) fetchML(h);
   }, []);
 
   // ============================
-  // ML Recommendations
+  // SEARCH (debounced)
   // ============================
-  const fetchRecommendations = async (hist) => {
+  useEffect(() => {
+    if (!query.trim()) return;
+    const t = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const r = await axios.get(`${API_BASE}/api/search/${category}?q=${encodeURIComponent(query)}`);
+        if (r.data) { setSongs(r.data); if (category === 'songs') setQueue(r.data); }
+      } catch { /* silent */ }
+      setSearching(false);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [query, category]);
+
+  // ============================
+  // ML RECOMMENDATIONS
+  // ============================
+  const fetchML = async (h) => {
     try {
-      const res = await axios.post(`${API_BASE}/api/recommend`, { history: hist });
-      if (res.data && res.data.length > 0) setMlRecommendations(res.data);
-    } catch (e) { console.error("ML Engine Error:", e); }
+      const r = await axios.post(`${API_BASE}/api/recommend`, { history: h });
+      if (r.data?.length) setMlPicks(r.data);
+    } catch { /* silent */ }
   };
 
   // ============================
-  // Search Engine (debounced)
+  // DETAIL FETCHER (album / artist / playlist)
   // ============================
-  useEffect(() => {
-    if (!searchQuery.trim()) {
-      // If query cleared, reload trending
-      if (songs.length === 0) {
-        axios.get(`${API_BASE}/api/search/songs?q=trending`).then(res => {
-          if (res.data && res.data.length > 0) { setSongs(res.data); setQueue(res.data); }
-        }).catch(() => {});
-      }
-      return;
-    }
-    const delay = setTimeout(async () => {
-      setIsSearching(true);
-      try {
-        const res = await axios.get(`${API_BASE}/api/search/${searchCategory}?q=${encodeURIComponent(searchQuery)}`);
-        if (res.data) {
-          setSongs(res.data);
-          if (searchCategory === 'songs') setQueue(res.data);
-        }
-      } catch (e) { console.error("Search failed"); }
-      finally { setIsSearching(false); }
-    }, 500);
-    return () => clearTimeout(delay);
-  }, [searchQuery, searchCategory]);
-
-  // ============================
-  // Album / Artist / Playlist Detail Fetcher
-  // ============================
-  const fetchDetail = async (item) => {
+  const openDetail = async (item) => {
     setDetailLoading(true);
-    setDetailView({ type: item.type, id: item.id, title: item.title, cover: item.cover, artist: item.artist, songs: [], meta: item });
+    setDetail({ ...item, songs: [] });
     try {
-      let detailData;
+      let data;
       if (item.type === 'album') {
-        const res = await axios.get(`${API_BASE}/api/albums/${item.id}`);
-        detailData = res.data;
+        data = (await axios.get(`${API_BASE}/api/albums/${item.id}`)).data;
       } else if (item.type === 'artist') {
-        const res = await axios.get(`${API_BASE}/api/artists/${item.id}`);
-        detailData = res.data;
+        data = (await axios.get(`${API_BASE}/api/artists/${item.id}`)).data;
       } else {
-        // Fallback for playlists — search songs by title
-        const res = await axios.get(`${API_BASE}/api/search/songs?q=${encodeURIComponent(item.title)}`);
-        detailData = { songs: res.data || [] };
+        const r = await axios.get(`${API_BASE}/api/search/songs?q=${encodeURIComponent(item.title)}`);
+        data = { songs: r.data || [], title: item.title, cover: item.cover };
       }
-      if (detailData) {
-        setDetailView(prev => ({
-          ...prev, 
-          songs: detailData.songs || [],
-          title: detailData.title || prev.title,
-          cover: detailData.cover || prev.cover,
-          artist: detailData.artist || prev.artist,
-          meta: { ...prev.meta, ...detailData }
-        }));
-        if (detailData.songs && detailData.songs.length > 0) {
-          setQueue(detailData.songs);
-        }
+      if (data) {
+        setDetail(prev => ({ ...prev, ...data, songs: data.songs || [] }));
+        if (data.songs?.length) setQueue(data.songs);
       }
-    } catch (e) {
-      console.error("Detail fetch error:", e);
-      // Fallback: search by name
+    } catch {
       try {
-        const fallback = await axios.get(`${API_BASE}/api/search/songs?q=${encodeURIComponent(item.title)}`);
-        if (fallback.data && fallback.data.length > 0) {
-          setDetailView(prev => ({ ...prev, songs: fallback.data }));
-          setQueue(fallback.data);
-        }
-      } catch (e2) { console.error("Fallback also failed"); }
+        const fb = await axios.get(`${API_BASE}/api/search/songs?q=${encodeURIComponent(item.title)}`);
+        if (fb.data?.length) { setDetail(prev => ({ ...prev, songs: fb.data })); setQueue(fb.data); }
+      } catch { /* silent */ }
     }
-    finally { setDetailLoading(false); }
+    setDetailLoading(false);
   };
 
   // ============================
-  // Health Hazard Tracker
+  // PLAYBACK
   // ============================
-  useEffect(() => {
-    let timer;
-    if (isPlaying && !healthWarningDisabled) {
-      timer = setInterval(() => {
-        setListeningTime(prev => {
-          const newTime = prev + 1;
-          if (newTime === 7200) setHealthWarningOpen(true);
-          return newTime;
-        });
-      }, 1000);
-    }
-    return () => clearInterval(timer);
-  }, [isPlaying, healthWarningDisabled]);
-
-  // Filtering
-  const filteredSongs = activeSection === 'All'
-    ? songs
-    : songs.filter(s => s.lang === activeSection);
-
-  // ============================
-  // Playback Handlers
-  // ============================
-  const handlePlay = (song) => {
-    if (song.type === 'album' || song.type === 'artist' || song.type === 'playlist') {
-      fetchDetail(song);
-      return;
-    }
-    setCurrentSong(song);
-    setIsPlaying(true);
-    const newHist = [song, ...history.filter(h => h.id !== song.id)].slice(0, 20);
-    setHistory(newHist);
-    localStorage.setItem('auraplay_history', JSON.stringify(newHist));
-    fetchRecommendations(newHist);
+  const playSong = (song) => {
+    if (['album', 'artist', 'playlist'].includes(song.type)) { openDetail(song); return; }
+    setCurrent(song); setPlaying(true);
+    const h = [song, ...history.filter(x => x.id !== song.id)].slice(0, 30);
+    setHistory(h); localStorage.setItem('aura_hist', JSON.stringify(h));
+    fetchML(h);
   };
 
-  const togglePlayPause = () => setIsPlaying(!isPlaying);
-
-  const handleNext = () => {
-    const playList = queue.length > 0 ? queue : songs;
-    const currentIndex = playList.findIndex(s => s.id === currentSong.id);
-    if (isShuffle) {
-      setCurrentSong(playList[Math.floor(Math.random() * playList.length)]);
-    } else {
-      setCurrentSong(playList[(currentIndex + 1) % playList.length] || playList[0]);
-    }
-    setIsPlaying(true);
+  const next = () => {
+    const list = queue.length ? queue : songs;
+    if (!list.length) return;
+    const i = list.findIndex(s => s.id === current.id);
+    const n = shuffle ? list[Math.floor(Math.random() * list.length)] : list[(i + 1) % list.length];
+    setCurrent(n); setPlaying(true);
   };
 
-  const handlePrev = () => {
-    const playList = queue.length > 0 ? queue : songs;
-    const currentIndex = playList.findIndex(s => s.id === currentSong.id);
-    setCurrentSong(playList[(currentIndex - 1 + playList.length) % playList.length] || playList[0]);
-    setIsPlaying(true);
-  };
-
-  const handleTimeUpdate = () => setProgress(audioRef.current.currentTime);
-
-  const handleLoadedMetadata = () => {
-    setDuration(audioRef.current.duration);
-    if (audioRef.current) audioRef.current.volume = volume;
-  };
-
-  const formatTime = (time) => {
-    if (!time || isNaN(time)) return "00:00";
-    const m = Math.floor(time / 60);
-    const s = Math.floor(time % 60);
-    return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
+  const prev = () => {
+    const list = queue.length ? queue : songs;
+    if (!list.length) return;
+    const i = list.findIndex(s => s.id === current.id);
+    setCurrent(list[(i - 1 + list.length) % list.length]); setPlaying(true);
   };
 
   useEffect(() => {
-    if (audioRef.current) {
-      if (isPlaying) audioRef.current.play().catch(e => console.log('Audio play error:', e));
-      else audioRef.current.pause();
-    }
-  }, [isPlaying, currentSong]);
+    if (!audioRef.current) return;
+    if (playing) audioRef.current.play().catch(() => {});
+    else audioRef.current.pause();
+  }, [playing, current]);
 
-  const handleAudioEnded = () => {
-    if (isRepeat) { audioRef.current.currentTime = 0; audioRef.current.play(); }
-    else handleNext();
-  };
+  const onEnded = () => { if (repeat) { audioRef.current.currentTime = 0; audioRef.current.play(); } else next(); };
+  const onTime = () => setProgress(audioRef.current.currentTime);
+  const onMeta = () => { setDuration(audioRef.current.duration); audioRef.current.volume = vol; };
 
-  const handleImportPlaylist = async () => {
-    if (!importUrl) return;
-    setIsImporting(true);
+  // Health tracker
+  useEffect(() => {
+    if (!playing || healthOff) return;
+    const t = setInterval(() => setListenSec(p => { if (p + 1 === 7200) setHealthOpen(true); return p + 1; }), 1000);
+    return () => clearInterval(t);
+  }, [playing, healthOff]);
+
+  // Filter by language
+  const filtered = lang === 'All' ? songs : songs.filter(s => s.lang === lang);
+
+  // ============================
+  // DOWNLOAD
+  // ============================
+  const downloadSong = async (song) => {
+    if (!song.audioUrl) return alert('No audio source available.');
     try {
-      const response = await axios.post(`${API_BASE}/api/playlist/import`, { url: importUrl });
-      if (response.data && response.data.tracks) {
-        setSongs(prev => mergeDuplicates([...response.data.tracks, ...prev]));
-        setExportModalOpen(false);
-        setImportUrl('');
-        alert(response.data.message);
-      }
-    } catch (err) { alert('Error fetching playlist.'); }
-    finally { setIsImporting(false); }
-  };
-
-  const handleDownload = async (song) => {
-    if (!song.audioUrl) return alert('Cannot download. Source unavailable.');
-    try {
-      alert(`Downloading ${song.title}...`);
-      const response = await fetch(song.audioUrl);
-      const blob = await response.blob();
+      const res = await fetch(song.audioUrl);
+      const blob = await res.blob();
       const reader = new FileReader();
       reader.readAsDataURL(blob);
       reader.onloadend = async () => {
-        const base64data = reader.result;
-        let finalUri = '';
+        let uri = song.audioUrl;
         if (Capacitor.isNativePlatform()) {
-          const fileName = `auraplay_${song.id}.mp3`;
-          await Filesystem.writeFile({ path: fileName, data: base64data, directory: Directory.Data });
-          const uriResult = await Filesystem.getUri({ directory: Directory.Data, path: fileName });
-          finalUri = Capacitor.convertFileSrc(uriResult.uri);
+          const fn = `auraplay_${song.id}.mp3`;
+          await Filesystem.writeFile({ path: fn, data: reader.result, directory: Directory.Data });
+          const u = await Filesystem.getUri({ directory: Directory.Data, path: fn });
+          uri = Capacitor.convertFileSrc(u.uri);
         } else {
-          const url = window.URL.createObjectURL(blob);
           const a = document.createElement('a');
-          a.style.display = 'none'; a.href = url; a.download = `${song.title} - ${song.artist}.mp3`;
-          document.body.appendChild(a); a.click(); window.URL.revokeObjectURL(url);
-          finalUri = song.audioUrl;
+          a.href = window.URL.createObjectURL(blob);
+          a.download = `${song.title} - ${song.artist}.mp3`;
+          a.click(); window.URL.revokeObjectURL(a.href);
         }
-        const offlineSong = { ...song, localUri: finalUri };
-        const newDls = mergeDuplicates([offlineSong, ...downloads]);
-        setDownloads(newDls);
-        localStorage.setItem('auraplay_downloads', JSON.stringify(newDls));
+        const dl = dedupe([{ ...song, localUri: uri }, ...downloads]);
+        setDownloads(dl); localStorage.setItem('aura_dl', JSON.stringify(dl));
       };
-    } catch (err) { alert('Download failed.'); }
+    } catch { alert('Download failed.'); }
   };
 
-  // Play all songs from detail view
-  const playAllFromDetail = () => {
-    if (detailView && detailView.songs.length > 0) {
-      setQueue(detailView.songs);
-      setCurrentSong(detailView.songs[0]);
-      setIsPlaying(true);
-      const newHist = [detailView.songs[0], ...history.filter(h => h.id !== detailView.songs[0].id)].slice(0, 20);
-      setHistory(newHist);
-      localStorage.setItem('auraplay_history', JSON.stringify(newHist));
-    }
+  // Import playlist
+  const doImport = async () => {
+    if (!importUrl) return;
+    setImporting(true);
+    try {
+      const r = await axios.post(`${API_BASE}/api/playlist/import`, { url: importUrl });
+      if (r.data?.tracks) { setSongs(p => dedupe([...r.data.tracks, ...p])); setImportOpen(false); setImportUrl(''); }
+    } catch { alert('Import failed.'); }
+    setImporting(false);
   };
 
-  // ============================
+  // Play all from detail
+  const playAll = () => {
+    if (!detail?.songs?.length) return;
+    setQueue(detail.songs); setCurrent(detail.songs[0]); setPlaying(true);
+  };
+
+  // ============================================================
   // RENDER
-  // ============================
+  // ============================================================
   return (
     <div className="app-container">
-      <audio 
-        ref={audioRef} 
-        src={currentSong?.localUri || currentSong?.audioUrl || ''} 
-        onEnded={handleAudioEnded} 
-        onTimeUpdate={handleTimeUpdate}
-        onLoadedMetadata={handleLoadedMetadata}
-      />
+      <audio ref={audioRef} src={current?.localUri || current?.audioUrl || ''} onEnded={onEnded} onTimeUpdate={onTime} onLoadedMetadata={onMeta} />
 
-      {/* SIDEBAR */}
+      {/* ==================== SIDEBAR ==================== */}
       <aside className="sidebar glass">
         <div className="brand">
-          <Music className="brand-icon" size={32} />
+          <Music className="brand-icon" size={28} />
           <span className="text-gradient">AuraPlay</span>
         </div>
-
-        <div className="nav-menu">
+        <nav className="nav-menu">
           <div className="nav-section-title">Menu</div>
-          <button className={`nav-item ${activeTab === 'Home' ? 'active' : ''}`} onClick={() => { setActiveTab('Home'); setDetailView(null); }}>
-            <Home size={20} /> <span>Home</span>
-          </button>
-          <button className={`nav-item ${activeTab === 'Explore' ? 'active' : ''}`} onClick={() => { setActiveTab('Explore'); setDetailView(null); }}>
-            <Compass size={20} /> <span>Explore</span>
-          </button>
-          <button className={`nav-item ${activeTab === 'Library' ? 'active' : ''}`} onClick={() => { setActiveTab('Library'); setDetailView(null); }}>
-            <Library size={20} /> <span>Library</span>
-          </button>
-
+          {[['Home', Home], ['Explore', Compass], ['Library', Library]].map(([name, Icon]) => (
+            <button key={name} className={`nav-item ${tab === name ? 'active' : ''}`} onClick={() => { setTab(name); setDetail(null); }}>
+              <Icon size={20} /><span>{name}</span>
+            </button>
+          ))}
           <div className="nav-section-title">Features</div>
-          <button className="nav-item" onClick={() => setExportModalOpen(true)}>
-            <Download size={20} /> <span>Import</span>
-          </button>
-          <button className="nav-item" onClick={() => setCloudModalOpen(true)}>
-            <Cloud size={20} /> <span>Cloud Sync</span>
-          </button>
-          <button className="nav-item" onClick={() => { setActiveTab('Library'); setDetailView(null); }}>
-            <ArrowDownToLine size={20} /> <span>Downloads</span>
-          </button>
-        </div>
-
+          <button className="nav-item" onClick={() => setImportOpen(true)}><Download size={20} /><span>Import</span></button>
+          <button className="nav-item" onClick={() => setCloudOpen(true)}><Cloud size={20} /><span>Cloud Sync</span></button>
+          <button className="nav-item" onClick={() => { setTab('Library'); setDetail(null); }}><ArrowDownToLine size={20} /><span>Downloads</span></button>
+        </nav>
         <div className="profile-selector glass" onClick={() => setProfileOpen(true)}>
-          <div className="profile-avatar">{currentProfile.avatar}</div>
-          <div style={{ flex: 1, textAlign: 'left', fontSize: '14px', fontWeight: 600 }}>{currentProfile.name}</div>
-          <div className="online-indicator"></div>
+          <div className="profile-avatar">{profile.avatar}</div>
+          <div style={{ flex: 1, fontSize: 14, fontWeight: 600 }}>{profile.name}</div>
+          <div className="online-indicator" />
         </div>
       </aside>
 
-      {/* MAIN CONTENT */}
+      {/* ==================== MAIN ==================== */}
       <main className="main-wrapper">
+
+        {/* TOP BAR */}
         <header className="topbar glass-panel">
           <div className="search-bar">
-            {isSearching 
-              ? <Loader2 size={18} color="var(--primary)" className="spin-icon" style={{animation: 'spin-slow 1s linear infinite'}} /> 
-              : <Search size={18} color="var(--text-muted)" />
-            }
-            <input 
-              type="text" 
-              placeholder={`Search ${searchCategory}...`}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-            {searchQuery && (
-              <button onClick={() => { setSearchQuery(''); }} style={{color: 'var(--text-muted)'}}>
-                <X size={16} />
-              </button>
-            )}
+            {searching ? <Loader2 size={18} color="var(--primary)" style={{animation:'spin-slow 1s linear infinite'}} /> : <Search size={18} color="var(--text-muted)" />}
+            <input type="text" placeholder={`Search ${category}...`} value={query} onChange={e => setQuery(e.target.value)} />
+            {query && <button onClick={() => setQuery('')} style={{color:'var(--text-muted)'}}><X size={16} /></button>}
           </div>
-          <div className="search-filters" style={{display: 'flex', gap: '8px', padding: '0 10px', marginLeft: '10px'}}>
-            {['songs', 'albums', 'artists', 'playlists'].map(cat => (
-              <button 
-                key={cat} 
-                onClick={() => { setSearchCategory(cat); setDetailView(null); if (searchQuery) setSongs([]); }}
-                style={{
-                  background: searchCategory === cat ? 'var(--primary)' : 'rgba(255,255,255,0.05)',
-                  border: 'none', color: '#fff', padding: '8px 16px', borderRadius: '20px',
-                  textTransform: 'capitalize', fontSize: '13px', cursor: 'pointer',
-                  fontWeight: searchCategory === cat ? '700' : '500'
-                }}
-              >
-                {cat === 'songs' && <Music size={14} style={{marginRight: 4, verticalAlign: 'middle'}} />}
-                {cat === 'albums' && <Disc3 size={14} style={{marginRight: 4, verticalAlign: 'middle'}} />}
-                {cat === 'artists' && <Users size={14} style={{marginRight: 4, verticalAlign: 'middle'}} />}
-                {cat === 'playlists' && <ListMusic size={14} style={{marginRight: 4, verticalAlign: 'middle'}} />}
-                {cat}
-              </button>
-            ))}
+          <div className="search-filters">
+            {SEARCH_CATS.map(c => {
+              const Icon = CAT_ICONS[c];
+              return (
+                <button key={c} className={`filter-pill ${category === c ? 'active' : ''}`} onClick={() => { setCategory(c); setDetail(null); if (query) setSongs([]); }}>
+                  <Icon size={14} />{c}
+                </button>
+              );
+            })}
           </div>
           <div className="top-actions">
-            <button className="action-btn" onClick={() => alert('No new notifications!')}><Bell size={18} /></button>
-            <button className="action-btn" onClick={() => alert('Settings coming soon!')}><Settings size={18} /></button>
+            <button className="action-btn"><Bell size={18} /></button>
+            <button className="action-btn"><Settings size={18} /></button>
           </div>
         </header>
 
+        {/* CONTENT AREA */}
         <div className="main-content">
-          
-          {/* ======================== DETAIL VIEW ======================== */}
-          {detailView ? (
-            <div className="detail-view">
-              <button 
-                className="back-btn" 
-                onClick={() => setDetailView(null)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)',
-                  marginBottom: '24px', fontSize: '14px', fontWeight: '600'
-                }}
-              >
-                <ChevronLeft size={20} /> Back to results
-              </button>
 
-              <div style={{
-                display: 'flex', gap: '32px', marginBottom: '40px', alignItems: 'flex-end'
-              }}>
-                <img 
-                  src={detailView.cover} 
-                  alt={detailView.title}
-                  style={{
-                    width: '200px', height: '200px', objectFit: 'cover',
-                    borderRadius: detailView.type === 'artist' ? '50%' : '20px',
-                    boxShadow: '0 20px 40px rgba(0,0,0,0.5)'
-                  }}
-                />
-                <div>
-                  <div style={{fontSize: '12px', textTransform: 'uppercase', letterSpacing: '2px', color: 'var(--primary)', marginBottom: '8px', fontWeight: 700}}>
-                    {detailView.type}
-                  </div>
-                  <h1 style={{fontSize: '42px', fontWeight: 800, letterSpacing: '-1px', marginBottom: '8px'}}>{detailView.title}</h1>
-                  {detailView.artist && <p style={{color: 'var(--text-muted)', fontSize: '16px', marginBottom: '16px'}}>{detailView.artist}</p>}
-                  {detailView.meta?.year && <span style={{color: 'var(--text-muted)', fontSize: '13px'}}>{detailView.meta.year} • {detailView.meta.language}</span>}
-                  {detailView.meta?.songCount && <span style={{color: 'var(--text-muted)', fontSize: '13px'}}>{detailView.meta.songCount} songs</span>}
-                  <div style={{marginTop: '20px', display: 'flex', gap: '12px'}}>
-                    <button 
-                      className="hero-btn" 
-                      onClick={playAllFromDetail}
-                      style={{display: 'flex', alignItems: 'center', gap: '8px'}}
-                    >
-                      <Play fill="white" size={16} /> Play All
-                    </button>
-                    <button 
-                      className="hero-btn" 
-                      style={{background: 'rgba(255,255,255,0.1)', color: 'var(--text-main)'}}
-                      onClick={() => { if (detailView.songs.length > 0) { setQueue(prev => mergeDuplicates([...prev, ...detailView.songs])); alert('Added to queue!'); } }}
-                    >
-                      <Plus size={16} /> Add to Queue
-                    </button>
+          {/* ---------- DETAIL VIEW ---------- */}
+          {detail ? (
+            <section className="detail-view">
+              <button className="back-btn" onClick={() => setDetail(null)}><ChevronLeft size={20} /> Back</button>
+
+              <div className="detail-header">
+                <img src={detail.cover} alt="" className={`detail-cover ${detail.type === 'artist' ? 'round' : ''}`} />
+                <div className="detail-info">
+                  <span className="detail-type">{detail.type}</span>
+                  <h1 className="detail-title">{detail.title}</h1>
+                  {detail.artist && <p className="detail-artist">{detail.artist}</p>}
+                  {(detail.year || detail.language) && <p className="detail-meta">{detail.year}{detail.year && detail.language ? ' • ' : ''}{detail.language}</p>}
+                  {detail.songCount && <p className="detail-meta">{detail.songCount} songs</p>}
+                  {detail.fanCount && <p className="detail-meta">{detail.fanCount} fans</p>}
+                  <div className="detail-actions">
+                    <button className="btn-primary" onClick={playAll}><Play fill="white" size={16} /> Play All</button>
+                    <button className="btn-secondary" onClick={() => { if (detail.songs?.length) { setQueue(p => dedupe([...p, ...detail.songs])); } }}><Plus size={16} /> Queue</button>
                   </div>
                 </div>
               </div>
 
-              {/* Song List in Detail View */}
               {detailLoading ? (
-                <div style={{textAlign: 'center', padding: '40px', color: 'var(--text-muted)'}}>
-                  <Loader2 size={32} style={{animation: 'spin-slow 1s linear infinite'}} />
-                  <p style={{marginTop: '12px'}}>Loading tracks...</p>
-                </div>
-              ) : detailView.songs.length > 0 ? (
+                <div className="center-msg"><Loader2 size={32} className="spinner" /><p>Loading tracks...</p></div>
+              ) : detail.songs?.length > 0 ? (
                 <div className="track-list">
-                  {detailView.songs.map((song, i) => (
-                    <div 
-                      key={song.id} 
-                      className="track-item"
-                      onClick={() => { handlePlay(song); setQueue(detailView.songs); }}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: '16px',
-                        padding: '12px 16px', borderRadius: '12px', cursor: 'pointer',
-                        background: currentSong.id === song.id ? 'rgba(249,168,38,0.1)' : 'transparent',
-                        transition: 'background 0.2s ease',
-                        borderBottom: '1px solid rgba(255,255,255,0.03)'
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.background = currentSong.id === song.id ? 'rgba(249,168,38,0.15)' : 'rgba(255,255,255,0.03)'}
-                      onMouseLeave={e => e.currentTarget.style.background = currentSong.id === song.id ? 'rgba(249,168,38,0.1)' : 'transparent'}
-                    >
-                      <span style={{width: '28px', textAlign: 'center', color: currentSong.id === song.id ? 'var(--primary)' : 'var(--text-muted)', fontWeight: 600, fontSize: '14px'}}>
-                        {currentSong.id === song.id && isPlaying ? <Pause size={16} /> : (i + 1)}
-                      </span>
-                      <img src={song.cover} alt="" style={{width: '44px', height: '44px', borderRadius: '8px', objectFit: 'cover'}} />
-                      <div style={{flex: 1, minWidth: 0}}>
-                        <div style={{fontWeight: 600, fontSize: '15px', color: currentSong.id === song.id ? 'var(--primary)' : 'var(--text-main)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>{song.title}</div>
-                        <div style={{fontSize: '13px', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>{song.artist}</div>
+                  {detail.songs.map((s, i) => (
+                    <div key={s.id} className={`track-row ${current.id === s.id ? 'active' : ''}`} onClick={() => { playSong(s); setQueue(detail.songs); }}>
+                      <span className="track-num">{current.id === s.id && playing ? <Pause size={14} /> : i + 1}</span>
+                      <img src={s.cover} alt="" className="track-thumb" />
+                      <div className="track-info">
+                        <div className="track-name">{s.title}</div>
+                        <div className="track-artist">{s.artist}</div>
                       </div>
-                      <button 
-                        className="control-btn" 
-                        onClick={(e) => { e.stopPropagation(); handleDownload(song); }}
-                        style={{color: 'var(--text-muted)'}}
-                      >
-                        <ArrowDownToLine size={16} />
-                      </button>
+                      {s.duration && <span className="track-dur">{fmtTime(s.duration)}</span>}
+                      <button className="track-dl" onClick={e => { e.stopPropagation(); downloadSong(s); }}><ArrowDownToLine size={16} /></button>
                     </div>
                   ))}
                 </div>
               ) : (
-                <p style={{color: 'var(--text-muted)', textAlign: 'center', padding: '40px'}}>No tracks found for this {detailView.type}.</p>
+                <div className="center-msg"><p>No tracks found.</p></div>
               )}
-            </div>
+            </section>
+
           ) : (
             <>
-              {/* ======================== EXPLORE TAB ======================== */}
-              {activeTab === 'Explore' && (
+              {/* ---------- HOME ---------- */}
+              {tab === 'Home' && (
                 <>
-                  <div className="hero-banner">
-                    <div className="hero-subtitle">Explore</div>
-                    <div className="hero-title">Discover New<br />Music Today.</div>
-                    <button className="hero-btn" onClick={() => { setSearchQuery('new releases'); setSearchCategory('songs'); }}>Browse Hits</button>
-                  </div>
-
-                  <div className="section-title"><span>Search Results</span></div>
-                  {isSearching && <div style={{textAlign: 'center', padding: '20px', color: 'var(--text-muted)'}}><Loader2 size={24} style={{animation: 'spin-slow 1s linear infinite'}} /></div>}
-                  <div className="grid">
-                    {filteredSongs.map((song) => (
-                      <div className={`card ${song.type === 'artist' ? 'artist' : ''}`} key={song.id} onClick={() => handlePlay(song)}>
-                        <div className="card-img-wrapper">
-                          <img src={song.cover} alt={song.title} className="card-img" />
-                          <div className="card-play-btn"><Play fill="white" size={20} /></div>
-                        </div>
-                        <div className="card-title">{song.title}</div>
-                        <div className="card-subtitle">{song.artist || song.role || song.language || ''}</div>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              )}
-
-              {/* ======================== LIBRARY TAB ======================== */}
-              {activeTab === 'Library' && (
-                <>
-                  <div className="section-title"><span>Your Downloads & Offline Music</span></div>
-                  {downloads.length === 0 ? (
-                    <div style={{textAlign: 'center', padding: '60px 20px'}}>
-                      <ArrowDownToLine size={48} color="var(--text-muted)" style={{marginBottom: '16px', opacity: 0.4}} />
-                      <p style={{color: 'var(--text-muted)', fontSize: '16px'}}>No downloaded songs yet.</p>
-                      <p style={{color: 'var(--text-muted)', fontSize: '13px', marginTop: '8px'}}>Click the download icon on any song to save it offline.</p>
-                    </div>
-                  ) : (
-                    <div className="grid">
-                      {downloads.map((song) => (
-                        <div className="card" key={song.id} onClick={() => handlePlay(song)}>
-                          <div className="card-img-wrapper">
-                            <img src={song.cover} alt="Cover" className="card-img" />
-                            <div className="card-play-btn"><Play fill="white" size={20} /></div>
-                          </div>
-                          <div className="card-title">{song.title}</div>
-                          <div className="card-subtitle">{song.artist} • Offline</div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {history.length > 0 && (
-                    <>
-                      <div className="section-title" style={{marginTop: '32px'}}><span>Recently Played</span></div>
-                      <div className="grid">
-                        {history.slice(0, 10).map((song) => (
-                          <div className="card" key={song.id} onClick={() => handlePlay(song)}>
-                            <div className="card-img-wrapper">
-                              <img src={song.cover} alt="Cover" className="card-img" />
-                              <div className="card-play-btn"><Play fill="white" size={20} /></div>
-                            </div>
-                            <div className="card-title">{song.title}</div>
-                            <div className="card-subtitle">{song.artist}</div>
-                          </div>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </>
-              )}
-
-              {/* ======================== HOME TAB ======================== */}
-              {activeTab === 'Home' && (
-                <>
-                  {/* Language Filters */}
-                  <div className="categories" style={{display: 'flex', gap: '10px', marginBottom: '24px', overflowX: 'auto', paddingBottom: '8px'}}>
-                    {sections.map(sec => (
-                      <button
-                        key={sec}
-                        className={`category-pill ${activeSection === sec ? 'active' : ''}`}
-                        onClick={() => setActiveSection(sec)}
-                      >
-                        {sec}
-                      </button>
+                  <div className="lang-filters">
+                    {LANG_FILTERS.map(l => (
+                      <button key={l} className={`category-pill ${lang === l ? 'active' : ''}`} onClick={() => setLang(l)}>{l}</button>
                     ))}
                   </div>
 
-                  {/* Hero */}
                   <div className="hero-banner">
                     <div className="hero-subtitle">Trending Now</div>
                     <div className="hero-title">Experience The<br />Purest Sound.</div>
-                    <button className="hero-btn" onClick={() => { setActiveTab('Library'); }}>My Library</button>
+                    <button className="hero-btn" onClick={() => setTab('Library')}>My Library</button>
                   </div>
 
-                  {/* ML Recommendations */}
-                  {mlRecommendations.length > 0 && !searchQuery && (
-                    <>
-                      <div className="section-title" style={{marginTop: '20px'}}><span>Recommended For You</span></div>
+                  {mlPicks.length > 0 && !query && (
+                    <section>
+                      <div className="section-title"><span>Recommended For You</span></div>
                       <div className="grid">
-                        {mlRecommendations.slice(0, 5).map((song) => (
-                          <div className="card" key={song.id} onClick={() => handlePlay(song)}>
-                            <div className="card-img-wrapper">
-                              <img src={song.cover} alt="Cover" className="card-img" />
-                              <div className="card-play-btn"><Play fill="white" size={20} /></div>
-                            </div>
-                            <div className="card-title">{song.title}</div>
-                            <div className="card-subtitle">{song.artist} • For You</div>
+                        {mlPicks.slice(0, 5).map(s => (
+                          <div className="card" key={s.id} onClick={() => playSong(s)}>
+                            <div className="card-img-wrapper"><img src={s.cover} alt="" className="card-img" /><div className="card-play-btn"><Play fill="white" size={20} /></div></div>
+                            <div className="card-title">{s.title}</div>
+                            <div className="card-subtitle">{s.artist} • For You</div>
                           </div>
                         ))}
                       </div>
-                    </>
+                    </section>
                   )}
 
-                  {/* Main Results Grid */}
-                  <div className="section-title">
-                    <span>{searchQuery ? `Results for "${searchQuery}"` : 'Popular Music'}</span>
-                  </div>
+                  <div className="section-title"><span>{query ? `Results for "${query}"` : 'Popular Music'}</span></div>
 
-                  {isLoading || isSearching ? (
-                    <div style={{textAlign: 'center', padding: '40px', color: 'var(--text-muted)'}}>
-                      <Loader2 size={32} style={{animation: 'spin-slow 1s linear infinite'}} />
-                      <p style={{marginTop: '12px'}}>Fetching music...</p>
-                    </div>
-                  ) : filteredSongs.length === 0 ? (
-                    <div style={{textAlign: 'center', padding: '60px 20px'}}>
-                      <Search size={48} color="var(--text-muted)" style={{marginBottom: '16px', opacity: 0.4}} />
-                      <p style={{color: 'var(--text-muted)', fontSize: '16px'}}>No results found.</p>
-                      <p style={{color: 'var(--text-muted)', fontSize: '13px', marginTop: '8px'}}>Try searching for a song, album, or artist.</p>
-                    </div>
+                  {(booting || searching) ? (
+                    <div className="center-msg"><Loader2 size={32} className="spinner" /><p>Loading...</p></div>
+                  ) : filtered.length === 0 ? (
+                    <div className="center-msg"><Search size={48} style={{opacity:.3}} /><p>No results. Try searching for a song, album, or artist.</p></div>
                   ) : (
                     <div className="grid">
-                      {filteredSongs.map((song) => (
-                        <div className={`card ${song.type === 'artist' ? 'artist' : ''}`} key={song.id} onClick={() => handlePlay(song)}>
-                          <div className="card-img-wrapper">
-                            <img src={song.cover} alt={song.title} className="card-img" />
-                            <div className="card-play-btn"><Play fill="white" size={20} /></div>
-                          </div>
-                          <div className="card-title">{song.title}</div>
+                      {filtered.map(s => (
+                        <div className={`card ${s.type === 'artist' ? 'artist' : ''}`} key={s.id} onClick={() => playSong(s)}>
+                          <div className="card-img-wrapper"><img src={s.cover} alt="" className="card-img" /><div className="card-play-btn"><Play fill="white" size={20} /></div></div>
+                          <div className="card-title">{s.title}</div>
                           <div className="card-subtitle">
-                            {song.type === 'artist' ? (song.role || 'Artist') 
-                              : song.type === 'album' ? `${song.artist || ''} • ${song.year || ''}`
-                              : song.type === 'playlist' ? `${song.songCount || ''} songs • ${song.language || ''}`
-                              : `${song.artist || ''} • ${song.platform || song.lang || ''}`
-                            }
+                            {s.type === 'artist' ? (s.role || 'Artist')
+                              : s.type === 'album' ? `${s.artist || ''} • ${s.year || ''}`
+                              : s.type === 'playlist' ? `${s.songCount || ''} songs`
+                              : `${s.artist || ''}`}
                           </div>
                         </div>
                       ))}
                     </div>
                   )}
 
-                  {/* Quick Artists Row */}
-                  {!searchQuery && (
-                    <>
+                  {!query && (
+                    <section>
                       <div className="section-title"><span>Popular Artists</span></div>
-                      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))' }}>
-                        {['A.R. Rahman', 'Anirudh', 'Arijit Singh', 'Shreya Ghoshal', 'Devi Sri Prasad'].map((artist, i) => (
-                          <div 
-                            className="card artist" 
-                            key={i} 
-                            onClick={() => { setSearchQuery(artist); setSearchCategory('songs'); }}
-                          >
+                      <div className="grid artist-grid">
+                        {['A.R. Rahman', 'Anirudh', 'Arijit Singh', 'Shreya Ghoshal', 'Devi Sri Prasad', 'Sid Sriram'].map((a, i) => (
+                          <div className="card artist" key={i} onClick={() => { setQuery(a); setCategory('songs'); }}>
                             <div className="card-img-wrapper">
-                              <div style={{width: '100%', height: '100%', background: `linear-gradient(135deg, hsl(${i * 50 + 20}, 70%, 40%), hsl(${i * 50 + 60}, 80%, 30%))`, display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
-                                <Music size={40} color="rgba(255,255,255,0.3)" />
+                              <div className="artist-placeholder" style={{background: `linear-gradient(135deg, hsl(${i*55+20},65%,45%), hsl(${i*55+60},75%,35%))`}}>
+                                <Music size={36} color="rgba(255,255,255,0.25)" />
                               </div>
                             </div>
-                            <div className="card-title">{artist}</div>
+                            <div className="card-title">{a}</div>
                             <div className="card-subtitle">Artist</div>
                           </div>
                         ))}
                       </div>
-                    </>
+                    </section>
+                  )}
+                </>
+              )}
+
+              {/* ---------- EXPLORE ---------- */}
+              {tab === 'Explore' && (
+                <>
+                  <div className="hero-banner">
+                    <div className="hero-subtitle">Explore</div>
+                    <div className="hero-title">Discover New<br />Music Today.</div>
+                    <button className="hero-btn" onClick={() => { setQuery('new releases'); setCategory('songs'); }}>Browse Hits</button>
+                  </div>
+                  {searching && <div className="center-msg"><Loader2 size={24} className="spinner" /></div>}
+                  <div className="section-title"><span>Search Results</span></div>
+                  <div className="grid">
+                    {filtered.map(s => (
+                      <div className={`card ${s.type === 'artist' ? 'artist' : ''}`} key={s.id} onClick={() => playSong(s)}>
+                        <div className="card-img-wrapper"><img src={s.cover} alt="" className="card-img" /><div className="card-play-btn"><Play fill="white" size={20} /></div></div>
+                        <div className="card-title">{s.title}</div>
+                        <div className="card-subtitle">{s.artist || s.role || s.language || ''}</div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {/* ---------- LIBRARY ---------- */}
+              {tab === 'Library' && (
+                <>
+                  <div className="section-title"><span>Downloads & Offline</span></div>
+                  {downloads.length === 0 ? (
+                    <div className="center-msg"><ArrowDownToLine size={48} style={{opacity:.3}} /><p>No downloads yet. Tap the download icon on any song.</p></div>
+                  ) : (
+                    <div className="grid">
+                      {downloads.map(s => (
+                        <div className="card" key={s.id} onClick={() => playSong(s)}>
+                          <div className="card-img-wrapper"><img src={s.cover} alt="" className="card-img" /><div className="card-play-btn"><Play fill="white" size={20} /></div></div>
+                          <div className="card-title">{s.title}</div>
+                          <div className="card-subtitle">{s.artist} • Offline</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {history.length > 0 && (
+                    <section>
+                      <div className="section-title" style={{marginTop:32}}><span>Recently Played</span></div>
+                      <div className="grid">
+                        {history.slice(0, 10).map(s => (
+                          <div className="card" key={s.id} onClick={() => playSong(s)}>
+                            <div className="card-img-wrapper"><img src={s.cover} alt="" className="card-img" /><div className="card-play-btn"><Play fill="white" size={20} /></div></div>
+                            <div className="card-title">{s.title}</div>
+                            <div className="card-subtitle">{s.artist}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
                   )}
                 </>
               )}
@@ -721,171 +513,117 @@ function App() {
         </div>
       </main>
 
-      {/* FLOATING DYNAMIC ISLAND PLAYER */}
+      {/* ==================== PLAYER ISLAND ==================== */}
       <div className="player-bar-container">
         <div className="player-island">
           <div className="player-left">
-            <img
-              src={currentSong.cover}
-              alt="Now Playing"
-              className={`now-playing-img ${isPlaying ? 'playing' : ''}`}
-            />
+            <img src={current.cover} alt="" className={`now-playing-img ${playing ? 'playing' : ''}`} />
             <div className="now-playing-info">
-              <div className="song-title">{currentSong.title}</div>
-              <div className="song-artist">{currentSong.artist}</div>
+              <div className="song-title">{current.title}</div>
+              <div className="song-artist">{current.artist}</div>
             </div>
-            <button className="control-btn" style={{ marginLeft: '8px' }} onClick={() => handleDownload(currentSong)} title="Download">
-              <ArrowDownToLine size={18} color="var(--primary)" />
-            </button>
+            <button className="control-btn" onClick={() => downloadSong(current)} title="Download"><ArrowDownToLine size={18} color="var(--primary)" /></button>
           </div>
-
           <div className="player-center">
             <div className="player-controls">
-              <button className="control-btn" style={{color: isShuffle ? 'var(--primary)' : 'white'}} onClick={() => setIsShuffle(!isShuffle)}><Shuffle size={18} /></button>
-              <button className="control-btn" onClick={handlePrev}><SkipBack size={22} /></button>
-              <button
-                className="play-pause-btn"
-                style={{ background: drivingMode ? 'var(--secondary)' : 'var(--primary)', color: 'white' }}
-                onClick={togglePlayPause}
-              >
-                {isPlaying ? <Pause fill="white" size={18} /> : <Play fill="white" size={18} />}
+              <button className="control-btn" style={{color: shuffle ? 'var(--primary)' : ''}} onClick={() => setShuffle(!shuffle)}><Shuffle size={18} /></button>
+              <button className="control-btn" onClick={prev}><SkipBack size={22} /></button>
+              <button className="play-pause-btn" style={{background: drivingMode ? 'var(--secondary)' : 'var(--primary)'}} onClick={() => setPlaying(!playing)}>
+                {playing ? <Pause fill="white" size={18} /> : <Play fill="white" size={18} />}
               </button>
-              <button className="control-btn" onClick={handleNext}><SkipForward size={22} /></button>
-              <button className="control-btn" style={{color: isRepeat ? 'var(--primary)' : 'white'}} onClick={() => setIsRepeat(!isRepeat)}><Repeat size={18} /></button>
+              <button className="control-btn" onClick={next}><SkipForward size={22} /></button>
+              <button className="control-btn" style={{color: repeat ? 'var(--primary)' : ''}} onClick={() => setRepeat(!repeat)}><Repeat size={18} /></button>
             </div>
             <div className="progress-container">
-              <span>{formatTime(progress)}</span>
-              <div className="progress-bar-bg" style={{position: 'relative', display: 'flex', alignItems: 'center'}}>
-                <input 
-                  type="range" min="0" max={duration || 100} value={progress}
-                  onChange={(e) => { audioRef.current.currentTime = e.target.value; setProgress(e.target.value); }}
-                  style={{position: 'absolute', width: '100%', opacity: 0, cursor: 'pointer', zIndex: 5, height: '10px'}}
-                />
-                <div className="progress-bar-fill" style={{ background: drivingMode ? 'var(--secondary)' : 'var(--primary)', width: `${(progress / (duration || 1)) * 100}%` }}></div>
+              <span>{fmtTime(progress)}</span>
+              <div className="progress-bar-bg">
+                <input type="range" min="0" max={duration || 100} value={progress} onChange={e => { audioRef.current.currentTime = e.target.value; setProgress(+e.target.value); }} className="range-input" />
+                <div className="progress-bar-fill" style={{width: `${(progress/(duration||1))*100}%`, background: drivingMode ? 'var(--secondary)' : 'var(--primary)'}} />
               </div>
-              <span>{formatTime(duration)}</span>
+              <span>{fmtTime(duration)}</span>
             </div>
           </div>
-
           <div className="player-right">
-            <button className="control-btn" onClick={() => setDrivingMode(!drivingMode)} style={{ color: drivingMode ? 'var(--secondary)' : 'var(--text-muted)' }} title="Driving Mode">
-              <Car size={20} />
-            </button>
+            <button className="control-btn" onClick={() => setDrivingMode(!drivingMode)} style={{color: drivingMode ? 'var(--secondary)' : ''}} title="Driving Mode"><Car size={20} /></button>
             <button className="control-btn"><Volume2 size={20} /></button>
-            <div className="volume-bar" style={{ opacity: drivingMode ? 0.5 : 1, position: 'relative', display: 'flex', alignItems: 'center' }}>
-              <input 
-                type="range" min="0" max="1" step="0.01" value={volume}
-                onChange={(e) => { const v = parseFloat(e.target.value); setVolume(v); if(audioRef.current) audioRef.current.volume = v; }}
-                style={{position: 'absolute', width: '100%', opacity: 0, cursor: 'pointer', zIndex: 5, height: '10px'}}
-              />
-              <div className="volume-fill" style={{ width: drivingMode ? '25%' : `${volume * 100}%`, background: drivingMode ? 'var(--secondary)' : 'white' }}></div>
+            <div className="volume-bar">
+              <input type="range" min="0" max="1" step="0.01" value={vol} onChange={e => { setVol(+e.target.value); if(audioRef.current) audioRef.current.volume = +e.target.value; }} className="range-input" />
+              <div className="volume-fill" style={{width: `${vol*100}%`, background: drivingMode ? 'var(--secondary)' : 'white'}} />
             </div>
           </div>
         </div>
       </div>
 
-      {/* HEALTH HAZARD MODAL */}
-      <div className={`modal-overlay ${healthWarningOpen ? 'active' : ''}`}>
-        <div className="modal-content glass" style={{ border: '1px solid var(--secondary)', boxShadow: '0 0 30px rgba(255, 94, 98, 0.2)' }}>
+      {/* ==================== MODALS ==================== */}
+
+      {/* Health */}
+      <div className={`modal-overlay ${healthOpen ? 'active' : ''}`}>
+        <div className="modal-content glass" style={{border:'1px solid var(--secondary)'}}>
           <div className="modal-header">
-            <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--secondary)' }}>
-              <AlertTriangle size={24} /> Health Warning
-            </div>
-            <button onClick={() => setHealthWarningOpen(false)}><X size={24} /></button>
+            <div className="modal-title" style={{color:'var(--secondary)', display:'flex', alignItems:'center', gap:10}}><AlertTriangle size={24} /> Health Warning</div>
+            <button onClick={() => setHealthOpen(false)}><X size={24} /></button>
           </div>
-          <p style={{ marginBottom: '20px', color: 'var(--text-main)', lineHeight: '1.6' }}>
-            You have been listening for several hours. Prolonged exposure to continuous sound can cause fatigue.
-            <br /><br /><strong>We recommend taking a short break.</strong>
-          </p>
-          <div style={{display: 'flex', gap: '10px'}}>
-            <button className="hero-btn" style={{ flex: 1, background: 'var(--secondary)', boxShadow: 'none' }} onClick={() => setHealthWarningOpen(false)}>Dismiss</button>
-            <button className="hero-btn" style={{ flex: 1, background: 'rgba(255,255,255,0.1)', color: 'var(--text-muted)', boxShadow: 'none' }} onClick={() => { setHealthWarningDisabled(true); setHealthWarningOpen(false); }}>Disable</button>
+          <p style={{marginBottom:20, lineHeight:1.6}}>You've been listening for a long time. Take a short break for your hearing health.</p>
+          <div style={{display:'flex', gap:10}}>
+            <button className="btn-primary" style={{flex:1, background:'var(--secondary)'}} onClick={() => setHealthOpen(false)}>Dismiss</button>
+            <button className="btn-secondary" style={{flex:1}} onClick={() => { setHealthOff(true); setHealthOpen(false); }}>Disable</button>
           </div>
         </div>
       </div>
 
-      {/* IMPORT PLAYLISTS MODAL */}
-      <div className={`modal-overlay ${exportModalOpen ? 'active' : ''}`}>
+      {/* Import */}
+      <div className={`modal-overlay ${importOpen ? 'active' : ''}`}>
         <div className="modal-content glass">
           <div className="modal-header">
             <div className="modal-title">Import Playlists</div>
-            <button onClick={() => setExportModalOpen(false)}><X size={24} /></button>
+            <button onClick={() => setImportOpen(false)}><X size={24} /></button>
           </div>
-          <p style={{ marginBottom: '20px', color: 'var(--text-muted)' }}>
-            No login required! Just paste a link.
-          </p>
-          <button className="integration-btn">
-            <div style={{ background: '#1DB954', width: 32, height: 32, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Music size={16} color="white" /></div>
-            <div style={{ flex: 1, textAlign: 'left' }}>Import from Spotify</div>
-          </button>
-          <button className="integration-btn">
-            <div style={{ background: '#FF0000', width: 32, height: 32, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><PlayCircle size={16} color="white" /></div>
-            <div style={{ flex: 1, textAlign: 'left' }}>Import from YouTube</div>
-          </button>
-          <button className="integration-btn">
-            <div style={{ background: '#2BC5B4', width: 32, height: 32, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Music size={16} color="white" /></div>
-            <div style={{ flex: 1, textAlign: 'left' }}>Import from JioSaavn</div>
-          </button>
-          <div style={{ marginTop: '20px' }}>
-            <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px' }}>OR PASTE LINK</div>
-            <div className="search-bar" style={{ width: '100%', background: 'rgba(0,0,0,0.3)' }}>
-              <input type="text" placeholder="https://spotify.com/playlist..." value={importUrl} onChange={e => setImportUrl(e.target.value)} />
-              <button onClick={handleImportPlaylist} disabled={isImporting} style={{ color: 'var(--primary)', fontWeight: 'bold' }}>
-                {isImporting ? 'Syncing...' : 'Fetch'}
-              </button>
+          <p style={{marginBottom:20, color:'var(--text-muted)'}}>No login required. Paste a playlist link below.</p>
+          {[['Spotify','#1DB954'],['YouTube','#FF0000'],['JioSaavn','#2BC5B4']].map(([name, bg]) => (
+            <button className="integration-btn" key={name}>
+              <div style={{background:bg, width:32, height:32, borderRadius:8, display:'flex', alignItems:'center', justifyContent:'center'}}><Music size={16} color="white" /></div>
+              <div style={{flex:1, textAlign:'left'}}>Import from {name}</div>
+            </button>
+          ))}
+          <div style={{marginTop:20}}>
+            <div style={{fontSize:12, color:'var(--text-muted)', marginBottom:8}}>OR PASTE LINK</div>
+            <div className="search-bar" style={{width:'100%', background:'rgba(0,0,0,0.3)'}}>
+              <input type="text" placeholder="https://..." value={importUrl} onChange={e => setImportUrl(e.target.value)} />
+              <button onClick={doImport} disabled={importing} style={{color:'var(--primary)', fontWeight:'bold'}}>{importing ? 'Syncing...' : 'Fetch'}</button>
             </div>
           </div>
         </div>
       </div>
 
-      {/* CLOUD SYNC MODAL */}
-      <div className={`modal-overlay ${cloudModalOpen ? 'active' : ''}`}>
+      {/* Cloud */}
+      <div className={`modal-overlay ${cloudOpen ? 'active' : ''}`}>
         <div className="modal-content glass">
           <div className="modal-header">
             <div className="modal-title">Cloud Sync</div>
-            <button onClick={() => setCloudModalOpen(false)}><X size={24} /></button>
+            <button onClick={() => setCloudOpen(false)}><X size={24} /></button>
           </div>
-          <p style={{ marginBottom: '20px', color: 'var(--text-muted)' }}>Save your offline music directly to your cloud storage.</p>
-          <button className="integration-btn">
-            <div style={{ background: '#4285F4', width: 32, height: 32, borderRadius: 8 }} className="integration-icon"></div>
-            <div style={{ flex: 1, textAlign: 'left' }}>Connect Google One</div>
-          </button>
-          <button className="integration-btn">
-            <div style={{ background: '#0078D4', width: 32, height: 32, borderRadius: 8 }} className="integration-icon"></div>
-            <div style={{ flex: 1, textAlign: 'left' }}>Connect OneDrive</div>
-          </button>
+          <p style={{marginBottom:20, color:'var(--text-muted)'}}>Save offline music to your cloud.</p>
+          <button className="integration-btn"><div style={{background:'#4285F4', width:32, height:32, borderRadius:8}} /><div style={{flex:1, textAlign:'left'}}>Google One</div></button>
+          <button className="integration-btn"><div style={{background:'#0078D4', width:32, height:32, borderRadius:8}} /><div style={{flex:1, textAlign:'left'}}>OneDrive</div></button>
         </div>
       </div>
 
-      {/* PROFILES MODAL */}
+      {/* Profile */}
       <div className={`modal-overlay ${profileOpen ? 'active' : ''}`}>
-        <div className="modal-content glass" style={{ width: '300px' }}>
+        <div className="modal-content glass" style={{width:320}}>
           <div className="modal-header">
-            <div className="modal-title">Select Profile</div>
+            <div className="modal-title">Profiles</div>
             <button onClick={() => setProfileOpen(false)}><X size={24} /></button>
           </div>
-          {mockProfiles.map(p => (
-            <button
-              key={p.id}
-              className="integration-btn"
-              style={{ background: p.id === currentProfile.id ? 'var(--primary-glow)' : '' }}
-              onClick={() => { setCurrentProfile(p); setProfileOpen(false); }}
-            >
+          {PROFILES.map(p => (
+            <button key={p.id} className="integration-btn" style={{background: p.id === profile.id ? 'rgba(249,168,38,0.15)' : ''}} onClick={() => { setProfile(p); setProfileOpen(false); }}>
               <div className="profile-avatar">{p.avatar}</div>
-              <div style={{ flex: 1, textAlign: 'left' }}>{p.name}</div>
+              <div style={{flex:1, textAlign:'left'}}>{p.name}</div>
             </button>
           ))}
-          <div style={{display: 'flex', gap: '8px', marginTop: '16px'}}>
-            <input 
-              type="text" placeholder="New profile name..."
-              value={newProfileName} onChange={e => setNewProfileName(e.target.value)}
-              style={{flex: 1, background: 'rgba(0,0,0,0.3)', border: 'none', padding: '8px', color: 'white', borderRadius: '8px'}}
-            />
-            <button className="integration-btn" style={{justifyContent: 'center', color: 'var(--primary)'}}
-              onClick={() => { if(newProfileName.trim() !== '') { mockProfiles.push({ id: Date.now(), name: newProfileName, avatar: newProfileName[0].toUpperCase() }); setNewProfileName(''); setProfileOpen(false); } }}
-            >
-              <Plus size={18} />
-            </button>
+          <div style={{display:'flex', gap:8, marginTop:16}}>
+            <input type="text" placeholder="New profile..." value={newName} onChange={e => setNewName(e.target.value)} style={{flex:1, background:'rgba(0,0,0,0.3)', border:'none', padding:8, color:'white', borderRadius:8}} />
+            <button className="integration-btn" style={{justifyContent:'center', color:'var(--primary)'}} onClick={() => { if (newName.trim()) { PROFILES.push({id:Date.now(), name:newName, avatar:newName[0].toUpperCase()}); setNewName(''); setProfileOpen(false); } }}><Plus size={18} /></button>
           </div>
         </div>
       </div>
