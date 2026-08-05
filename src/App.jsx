@@ -11,16 +11,15 @@ import './App.css';
 // Mock Data
 const sections = ['All', 'Telugu', 'Hindi', 'English', 'Tamil', 'Malayalam', 'Directors', 'Top Plays', 'Sensations'];
 
-const initialMockSongs = [
-  { id: 1, title: 'Tum Hi Ho', artist: 'Arijit Singh', cover: 'https://images.unsplash.com/photo-1493225457124-a1a2a5f5cb39?q=80&w=200&auto=format&fit=crop', lang: 'Hindi', audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3' },
-  { id: 2, title: 'Butta Bomma', artist: 'Armaan Malik', cover: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?q=80&w=200&auto=format&fit=crop', lang: 'Telugu', audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3' },
-  { id: 3, title: 'Shape of You', artist: 'Ed Sheeran', cover: 'https://images.unsplash.com/photo-1458560871784-56d23406c091?q=80&w=200&auto=format&fit=crop', lang: 'English' },
-  { id: 4, title: 'Enjoy Enjaami', artist: 'Dhee, Arivu', cover: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?q=80&w=200&auto=format&fit=crop', lang: 'Tamil' },
-  { id: 5, title: 'Darshana', artist: 'Hesham Abdul Wahab', cover: 'https://images.unsplash.com/photo-1621360841013-c76831f12560?q=80&w=200&auto=format&fit=crop', lang: 'Malayalam' },
-  { id: 6, title: 'Naatu Naatu', artist: 'Rahul Sipligunj', cover: 'https://images.unsplash.com/photo-1506157786151-b8491531f063?q=80&w=200&auto=format&fit=crop', lang: 'Telugu' },
-  // Adding intentional duplicate
-  { id: 7, title: 'Shape of You', artist: 'Ed Sheeran', cover: 'https://images.unsplash.com/photo-1458560871784-56d23406c091?q=80&w=200&auto=format&fit=crop', lang: 'English' },
-];
+// Initial Blank State for Player
+const loadingSong = { 
+  id: 'loading', 
+  title: 'Loading Data...', 
+  artist: 'AuraPlay', 
+  cover: 'https://images.unsplash.com/photo-1614113489855-66422ad300a4?w=200', 
+  lang: 'Network', 
+  audioUrl: '' 
+};
 
 const mockProfiles = [
   { id: 1, name: 'Rohit', avatar: 'R' },
@@ -31,7 +30,7 @@ function App() {
   const [activeTab, setActiveTab] = useState('Home');
   const [activeSection, setActiveSection] = useState('All');
   const [isPlaying, setIsPlaying] = useState(false);
-  const [currentSong, setCurrentSong] = useState(initialMockSongs[0]);
+  const [currentSong, setCurrentSong] = useState(loadingSong);
 
   // Modals state
   const [exportModalOpen, setExportModalOpen] = useState(false);
@@ -75,7 +74,16 @@ function App() {
   };
 
   useEffect(() => {
-    setSongs(mergeDuplicates(initialMockSongs));
+    // Initial Network Boot (Fetching real data)
+    axios.get('https://auraplay.onrender.com/api/search/songs?q=trending')
+      .then(res => {
+        if (res.data && res.data.length > 0) {
+           setSongs(res.data);
+           setCurrentSong(res.data[0]); // Auto-load real track into player
+        }
+      })
+      .catch(e => console.log('Failed to fetch initial trending tracks.'));
+
     const savedHistory = JSON.parse(localStorage.getItem('auraplay_history')) || [];
     const savedDownloads = JSON.parse(localStorage.getItem('auraplay_downloads')) || [];
     setHistory(savedHistory);
@@ -88,7 +96,7 @@ function App() {
   // ML Fetcher
   const fetchRecommendations = async (hist) => {
     try {
-       const res = await axios.post('http://localhost:5000/api/recommend', { history: hist });
+       const res = await axios.post('https://auraplay.onrender.com/api/recommend', { history: hist });
        if (res.data && res.data.length > 0) setMlRecommendations(res.data);
     } catch (e) {
        console.error("ML Engine Error:", e);
@@ -101,7 +109,7 @@ function App() {
     const delay = setTimeout(async () => {
       setIsSearching(true);
       try {
-        const res = await axios.get(`http://localhost:5000/api/search?q=${encodeURIComponent(searchQuery)}`);
+        const res = await axios.get(`https://auraplay.onrender.com/api/search/songs?q=${encodeURIComponent(searchQuery)}`);
         if (res.data) setSongs(res.data);
       } catch (e) {
         console.error("Search failed");
@@ -197,7 +205,7 @@ function App() {
     if (!importUrl) return;
     setIsImporting(true);
     try {
-      const response = await axios.post('http://localhost:5000/api/playlist/import', { url: importUrl });
+      const response = await axios.post('https://auraplay.onrender.com/api/playlist/import', { url: importUrl });
       if (response.data && response.data.tracks) {
         setSongs(prev => mergeDuplicates([...response.data.tracks, ...prev]));
         setExportModalOpen(false);
@@ -366,7 +374,7 @@ function App() {
                </div>
                <div className="grid">
                  {mlRecommendations.slice(0, 5).map((song) => (
-                   <div className="card glass" key={song.id} onClick={() => handlePlay(song)} style={{border: '1px solid var(--primary)'}}>
+                   <div className="card glass" key={song.id} onClick={() => handlePlay(song)}>
                      <div className="card-img-wrapper">
                        <img src={song.cover} alt="Cover" className="card-img" />
                        <div className="card-play-btn"><Play fill="white" size={20} /></div>
